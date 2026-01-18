@@ -79,12 +79,12 @@ def main() -> None:
         .set_geometry("2d")
         .set_assumption("station_avg")
         .set_regularization("l2")
-        .set_l2(alpha=0.05, solver="auto")
+        .set_l2(alpha=0.05)
         .build()
     )
 
     out_sta = run_spfi(d_obs=d_obs_sta, freqs=freqs, subarray=subarray, sensor_xy=sensor_xy, cfg=cfg_sta)
-    v_inv_sta = _get_velocity_row(out_sta, row=0)  # (n_sensors,)
+    v_inv_sta = _get_velocity_row(out_sta, row=0)
     v_inv_grid_sta = _idw(sensor_xy, v_inv_sta, grid_x, grid_y, power=2.0)
 
     # B) ray_avg + L2
@@ -92,11 +92,10 @@ def main() -> None:
         SPFIConfigBuilder()
         .set_geometry("2d")
         .set_assumption("ray_avg")
-        .set_grid(grid_x, grid_y)          # ray_avg 必须
-        .set_pair_sampling(None, 2026)     # None=全对；太慢再改成 80/100...
+        .set_grid(grid_x, grid_y)
+        .set_pair_sampling(None, 2026)
         .set_regularization("l2")
-        # ray_avg 更病态：alpha 一般要比 station_avg 大，防止条纹/飙值
-        .set_l2(alpha=0.3, solver="auto")
+        .set_l2(alpha=0.3)
         .build()
     )
 
@@ -126,7 +125,7 @@ def main() -> None:
     d_obs_ray = v_sub_noisy.reshape(1, -1)
 
     out_ray = run_spfi(d_obs=d_obs_ray, freqs=freqs, subarray=subarray, sensor_xy=sensor_xy, cfg=cfg_ray)
-    v_inv_vec_ray = _get_velocity_row(out_ray, row=0)  # (n_cells,)
+    v_inv_vec_ray = _get_velocity_row(out_ray, row=0)
     v_inv_grid_ray = v_inv_vec_ray.reshape(len(grid_y), len(grid_x))
 
     _plot_compare_2x3(
