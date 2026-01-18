@@ -189,7 +189,6 @@ def _plot_1x3_pcolormesh(
     C_inv = vi.reshape(1, -1)
     C_diff = diff.reshape(1, -1)
 
-    # # 把传感器画在 y=0.5 上
     # s = np.asarray(sensor_xy, dtype=np.float64)
     # sx = s[:, 0] if (s.ndim == 2 and s.shape[1] == 1) else s.reshape(-1)
     # sy = np.full_like(sx, 0.5, dtype=np.float64)
