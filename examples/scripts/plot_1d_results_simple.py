@@ -1,12 +1,14 @@
 import numpy as np
 import matplotlib.pyplot as plt
-
 from seismocorr.core.subarray import get_subarray
 from seismocorr.core.spfi import run_spfi
 from seismocorr.config.builder import SPFIConfigBuilder
 
 
 def main() -> None:
+    """
+    简化版一维SPFI示例，专注于演示一维结果对比绘图
+    """
     rng = np.random.default_rng(2026)
 
     # 1D 通道坐标
@@ -18,17 +20,17 @@ def main() -> None:
     grid_x = np.linspace(0.0, width_m, 401, dtype=np.float64)
 
     v0, dv = 3.0, 0.3
-    tile_size_m = 2000.0  # 2km 一块棋盘（你可以改）
+    tile_size_m = 2000.0  # 2km 一块棋盘
     v_true_x = _checkerboard_1d(grid_x, v0=v0, dv=dv, tile=tile_size_m)
 
     # 通道真值：把 grid_x 的真值采样到每个通道位置
     v_true_sta = _sample_nearest_1d(grid_x, v_true_x, sensor_xy)
 
-    # 生成 1D 子阵列（随机滑窗 + 随机抽通道）
+    # 生成 1D 子阵列
     subarray = get_subarray("1d")(
         sensor_xy,
         n_realizations=4000,
-        window_length=100.0,  # 100m 窗
+        window_length=100.0,
         kmin=5,
         kmax=10,
         random_state=2026,
@@ -56,18 +58,8 @@ def main() -> None:
 
     out = run_spfi(d_obs=d_obs, freqs=freqs, subarray=subarray, sensor_xy=sensor_xy, cfg=cfg)
     v_inv_sta = _get_velocity_row(out, row=0)
-
-    # 反演结果插值到 grid_x 上，便于和真值对比
     v_inv_x = _idw_1d(sensor_xy, v_inv_sta, grid_x, power=2.0)
 
-    _plot_1x3_pcolormesh(
-        grid_x=grid_x,
-        sensor_xy=sensor_xy,
-        v_true=v_true_x,
-        v_inv=v_inv_x,
-        title=f"1D SPFI station_avg | freq={freqs[0]:.2f} Hz",
-    )
-    
     # 绘制一维结果对比图
     _plot_1d_results(
         grid_x=grid_x,
@@ -77,41 +69,7 @@ def main() -> None:
         d_obs=d_obs,
         v_inv_x=v_inv_x,
         subarray=subarray,
-        title=f"1D SPFI station_avg | freq={freqs[0]:.2f} Hz",
-    )
-
-    # ray_avg + L2
-    cfg_ray = (
-        SPFIConfigBuilder()
-        .set_geometry("1d")
-        .set_assumption("ray_avg")
-        .set_regularization("l2")
-        .set_l2(alpha=0.05)
-        .build()
-    )
-
-    out_ray = run_spfi(d_obs=d_obs, freqs=freqs, subarray=subarray, sensor_xy=sensor_xy, cfg=cfg_ray)
-    v_inv_ray = _get_velocity_row(out_ray, row=0)
-    v_inv_ray_x = _idw_1d(sensor_xy, v_inv_ray, grid_x, power=2.0)
-
-    _plot_1x3_pcolormesh(
-        grid_x=grid_x,
-        sensor_xy=sensor_xy,
-        v_true=v_true_x,
-        v_inv=v_inv_ray_x,
-        title=f"1D SPFI ray_avg | freq={freqs[0]:.2f} Hz",
-    )
-    
-    # 绘制一维结果对比图
-    _plot_1d_results(
-        grid_x=grid_x,
-        sensor_xy=sensor_xy,
-        v_true_x=v_true_x,
-        v_true_sta=v_true_sta,
-        d_obs=d_obs,
-        v_inv_x=v_inv_ray_x,
-        subarray=subarray,
-        title=f"1D SPFI ray_avg | freq={freqs[0]:.2f} Hz",
+        title=f"1D SPFI Results | freq={freqs[0]:.2f} Hz",
     )
 
 
@@ -169,76 +127,6 @@ def _get_velocity_row(out: dict, *, row: int) -> np.ndarray:
     return 1.0 / np.maximum(s, 1e-12)
 
 
-def _centers_to_edges_1d(xc: np.ndarray) -> np.ndarray:
-    """把严格递增的中心点 xc (nx,) 转成边界 x_edges (nx+1,)"""
-    x = np.asarray(xc, dtype=np.float64).reshape(-1)
-    if x.size < 2:
-        raise ValueError("grid_x 至少需要 2 个点。")
-    if not np.all(np.diff(x) > 0):
-        raise ValueError("grid_x 必须严格递增（中心点）。")
-
-    edges = np.empty(x.size + 1, dtype=np.float64)
-    edges[1:-1] = 0.5 * (x[:-1] + x[1:])
-    edges[0] = x[0] - (edges[1] - x[0])
-    edges[-1] = x[-1] + (x[-1] - edges[-2])
-    return edges
-
-
-def _plot_1x3_pcolormesh(
-    *,
-    grid_x: np.ndarray,
-    sensor_xy: np.ndarray,
-    v_true: np.ndarray,
-    v_inv: np.ndarray,
-    title: str,
-) -> None:
-    gx = np.asarray(grid_x, dtype=np.float64).reshape(-1)
-    vt = np.asarray(v_true, dtype=np.float64).reshape(-1)
-    vi = np.asarray(v_inv, dtype=np.float64).reshape(-1)
-    if vt.size != gx.size or vi.size != gx.size:
-        raise ValueError("v_true / v_inv 的长度必须与 grid_x 一致。")
-
-    diff = vi - vt
-
-    # 设置中文字体
-    plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
-    plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
-    
-    # 统一色标
-    vmin = float(min(vt.min(), vi.min()))
-    vmax = float(max(vt.max(), vi.max()))
-
-    # pcolormesh 需要 edges（nx+1, ny+1）
-    x_edges = _centers_to_edges_1d(gx)
-    y_edges = np.array([0.0, 1.0], dtype=np.float64)
-
-    C_true = vt.reshape(1, -1)
-    C_inv = vi.reshape(1, -1)
-    C_diff = diff.reshape(1, -1)
-
-    fig, axes = plt.subplots(1, 3, figsize=(14, 4), constrained_layout=True)
-    fig.suptitle(title)
-
-    im0 = axes[0].pcolormesh(x_edges, y_edges, C_true, shading="flat", vmin=vmin, vmax=vmax)
-    axes[0].set_title("真实值")
-    plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
-
-    im1 = axes[1].pcolormesh(x_edges, y_edges, C_inv, shading="flat", vmin=vmin, vmax=vmax)
-    axes[1].set_title("反演值")
-    plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
-
-    im2 = axes[2].pcolormesh(x_edges, y_edges, C_diff, shading="flat")
-    axes[2].set_title("差值")
-    plt.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
-
-    for ax in axes:
-        ax.set_xlabel("x (m)")
-        ax.set_ylabel("y (dummy)")
-        ax.set_ylim(0.0, 1.0)
-
-    plt.show()
-
-
 def _plot_1d_results(
     *,
     grid_x: np.ndarray,
@@ -266,7 +154,6 @@ def _plot_1d_results(
     # 转换为numpy数组并确保形状正确
     gx = np.asarray(grid_x, dtype=np.float64).reshape(-1)
     vtx = np.asarray(v_true_x, dtype=np.float64).reshape(-1)
-    vts = np.asarray(v_true_sta, dtype=np.float64).reshape(-1)
     obs = np.asarray(d_obs, dtype=np.float64).reshape(-1)
     vix = np.asarray(v_inv_x, dtype=np.float64).reshape(-1)
     sx = np.asarray(sensor_xy, dtype=np.float64).reshape(-1)
@@ -276,31 +163,26 @@ def _plot_1d_results(
         raise ValueError("v_true_x / v_inv_x 的长度必须与 grid_x 一致。")
     
     # 创建子阵列中心点坐标用于观测值的横坐标
-    # 由于观测值是子阵列的平均值，我们需要计算每个子阵列的中心点
     subarray_centers = np.array([np.mean(sx[np.array(s).reshape(-1)]) for s in subarray])
-    
-    # 设置中文字体
-    plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
-    plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
     
     # 创建绘图
     fig, axes = plt.subplots(3, 1, figsize=(12, 8), constrained_layout=True)
     fig.suptitle(title, fontsize=14)
     
     # 第一行：真实值
-    axes[0].plot(gx, vtx, color='black', linewidth=2, label='真实值')
-    axes[0].set_ylabel('速度 (km/s)')
-    axes[0].set_title('(1) 真实速度分布')
+    axes[0].plot(gx, vtx, color='black', linewidth=2, label='True Value')
+    axes[0].set_ylabel('Velocity (km/s)')
+    axes[0].set_title('(1) True Velocity Distribution')
     axes[0].grid(True, alpha=0.3)
     axes[0].legend()
     
     # 第二行：观测值和反演值
-    axes[1].plot(gx, vtx, color='black', linewidth=2, label='真实值', alpha=0.5)
-    axes[1].scatter(subarray_centers, obs, color='blue', s=10, alpha=0.5, label='有噪声的观测值')
-    axes[1].plot(gx, vix, color='red', linewidth=2, label='反演值')
-    axes[1].set_xlabel('距离 (m)')
-    axes[1].set_ylabel('速度 (km/s)')
-    axes[1].set_title('(2) 观测值与反演值对比')
+    axes[1].plot(gx, vtx, color='black', linewidth=2, label='True Value', alpha=0.5)
+    axes[1].scatter(subarray_centers, obs, color='blue', s=10, alpha=0.5, label='Noisy Observation')
+    axes[1].plot(gx, vix, color='red', linewidth=2, label='Inverted Value')
+    axes[1].set_xlabel('Distance (m)')
+    axes[1].set_ylabel('Velocity (km/s)')
+    axes[1].set_title('(2) Observation vs Inversion')
     axes[1].grid(True, alpha=0.3)
     axes[1].legend()
     
@@ -311,11 +193,11 @@ def _plot_1d_results(
     inv_diff = vix - vtx
     
     axes[2].plot(gx, np.zeros_like(gx), color='black', linestyle='--', alpha=0.5)
-    axes[2].scatter(subarray_centers, obs_diff, color='blue', s=10, alpha=0.5, label='观测值 - 真实值')
-    axes[2].plot(gx, inv_diff, color='red', linewidth=2, label='反演值 - 真实值')
-    axes[2].set_xlabel('距离 (m)')
-    axes[2].set_ylabel('速度差值 (km/s)')
-    axes[2].set_title('(3) 观测值和反演值与真实值的差值')
+    axes[2].scatter(subarray_centers, obs_diff, color='blue', s=10, alpha=0.5, label='Observation - True')
+    axes[2].plot(gx, inv_diff, color='red', linewidth=2, label='Inversion - True')
+    axes[2].set_xlabel('Distance (m)')
+    axes[2].set_ylabel('Velocity Difference (km/s)')
+    axes[2].set_title('(3) Differences from True Value')
     axes[2].grid(True, alpha=0.3)
     axes[2].legend()
     

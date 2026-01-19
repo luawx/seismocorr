@@ -13,30 +13,6 @@ import pywt
 
 ArrayLike = Union[np.ndarray, list]
 
-def moving_ave(A, N): ## change the moving average calculation to take as input N the full window length to smooth
-    '''
-    Alternative function for moving average for an array.
-    PARAMETERS:
-    ---------------------
-    A: 1-D array of data to be smoothed
-    N: integer, it defines the full!! window length to smooth
-    RETURNS:
-    ---------------------
-    B: 1-D array with smoothed data
-    '''
-    # defines an array with N extra samples at either side
-    temp = np.zeros(len(A) + 2 * N)
-    # set the central portion of the array to A
-    temp[N: -N] = A
-    # leading samples: equal to first sample of actual array
-    temp[0: N] = temp[N]
-    # trailing samples: Equal to last sample of actual array
-    temp[-N:] = temp[-N-1]
-    # convolve with a boxcar and normalize, and use only central portion of the result
-    # with length equal to the original array, discarding the added leading and trailing samples
-    B = np.convolve(temp, np.ones(N)/N, mode='same')[N: -N]
-    return B
-
 class TimeNormalizer(ABC):
     """时域归一化抽象基类"""
     @abstractmethod
@@ -94,11 +70,36 @@ class RAMNormalizer(TimeNormalizer):
         self.Fs = Fs
         self.norm_win = norm_win
 
+    @staticmethod
+    def _moving_ave(A, N):
+        '''
+        Alternative function for moving average for an array.
+        PARAMETERS:
+        ---------------------
+        A: 1-D array of data to be smoothed
+        N: integer, it defines the full!! window length to smooth
+        RETURNS:
+        ---------------------
+        B: 1-D array with smoothed data
+        '''
+        # defines an array with N extra samples at either side
+        temp = np.zeros(len(A) + 2 * N)
+        # set the central portion of the array to A
+        temp[N: -N] = A
+        # leading samples: equal to first sample of actual array
+        temp[0: N] = temp[N]
+        # trailing samples: Equal to last sample of actual array
+        temp[-N:] = temp[-N-1]
+        # convolve with a boxcar and normalize, and use only central portion of the result
+        # with length equal to the original array, discarding the added leading and trailing samples
+        B = np.convolve(temp, np.ones(N)/N, mode='same')[N: -N]
+        return B
+
     def apply(self, x: np.ndarray) -> np.ndarray:
         period = 1 / self.fmin
         lwin = int(period * self.Fs * self.norm_win)
         N = 2*lwin+1
-        x = x/moving_ave(np.abs(x),N)
+        x = x/self._moving_ave(np.abs(x),N)
         return x.copy()
 
 
@@ -337,10 +338,11 @@ def get_time_normalizer(name: str, **kwargs) -> TimeNormalizer:
     Returns:
         TimeNormalizer 实例
     """
-    cls = _TIME_NORM_MAP.get(name.lower())
+    name_lower = name.lower()
+    cls = _TIME_NORM_MAP.get(name_lower)
     if cls is None:
-        raise ValueError(f"Unknown time normalization method: '{name}'. "
-                       f"Choose from {list(_TIME_NORM_MAP.keys())}")
+        available_methods = list(_TIME_NORM_MAP.keys())
+        raise ValueError(f"未知的时域归一化方法: '{name}'. 请从以下方法中选择: {', '.join(available_methods)}")
     
     # 根据方法名传递特定参数
     if name.lower() == 'clip':

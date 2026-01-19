@@ -23,6 +23,7 @@ B) ray_avg + L2
 
 import numpy as np
 import matplotlib.pyplot as plt
+from time import time
 
 from seismocorr.core.subarray import get_subarray
 from seismocorr.core.spfi import run_spfi
@@ -31,6 +32,7 @@ from seismocorr.core.assumption import get_assumption
 
 
 def main() -> None:
+    start_time = time()
     rng = np.random.default_rng(2026)
 
     # 台站坐标
@@ -82,11 +84,12 @@ def main() -> None:
         .set_l2(alpha=0.05)
         .build()
     )
+    
 
     out_sta = run_spfi(d_obs=d_obs_sta, freqs=freqs, subarray=subarray, sensor_xy=sensor_xy, cfg=cfg_sta)
     v_inv_sta = _get_velocity_row(out_sta, row=0)
     v_inv_grid_sta = _idw(sensor_xy, v_inv_sta, grid_x, grid_y, power=2.0)
-
+    print(f"[Example] SPFI station_avg + L2 time cost: {time()-start_time:.2f} s")
     # B) ray_avg + L2
     cfg_ray = (
         SPFIConfigBuilder()
@@ -127,6 +130,7 @@ def main() -> None:
     out_ray = run_spfi(d_obs=d_obs_ray, freqs=freqs, subarray=subarray, sensor_xy=sensor_xy, cfg=cfg_ray)
     v_inv_vec_ray = _get_velocity_row(out_ray, row=0)
     v_inv_grid_ray = v_inv_vec_ray.reshape(len(grid_y), len(grid_x))
+    print(f"[Example] SPFI ray_avg + L2 time cost: {time()-start_time:.2f} s")
 
     _plot_compare_2x3(
         grid_x=grid_x,

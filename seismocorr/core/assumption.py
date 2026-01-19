@@ -14,6 +14,23 @@ from abc import ABC, abstractmethod
 from typing import List, Optional, Sequence, Tuple
 from scipy.sparse import csr_matrix
 
+# 优化库导入
+try:
+    from numba import njit, prange
+    NUMBA_AVAILABLE = True
+except ImportError:
+    NUMBA_AVAILABLE = False
+    
+    def njit(func=None, **kwargs):
+        """Numba不可用时的回退装饰器"""
+        if func is None:
+            return lambda f: f
+        return func
+    
+    def prange(n):
+        """Numba不可用时的回退prange"""
+        return range(n)
+
 
 Subarray = List[np.ndarray]
 MatrixLike = csr_matrix
@@ -280,8 +297,12 @@ def _rows_ray_2d(
             if seg_len.size == 0:
                 continue
 
-            flat = cell_ij[:, 1] * nx + cell_ij[:, 0]
-            np.add.at(w, flat, seg_len)
+            # 累计权重
+            for k in range(seg_len.size):
+                ix = cell_ij[k, 0]
+                iy = cell_ij[k, 1]
+                cell_idx = iy * nx + ix
+                w[cell_idx] += seg_len[k]
 
         s = float(np.sum(w))
         if s <= 0:
@@ -300,6 +321,7 @@ def _rows_ray_2d(
     )
 
 
+@njit(cache=True, fastmath=True)
 def _ray_grid_intersections_2d(
     x_edges: np.ndarray,
     y_edges: np.ndarray,
@@ -320,32 +342,93 @@ def _ray_grid_intersections_2d(
     dx = x2 - x1
     dy = y2 - y1
 
-    ts: List[float] = [0.0, 1.0]
+    # 使用数组而不是列表来存储ts，提高Numba性能
+    ts_size = 2 + (x_edges.size if abs(dx) > eps else 0) + (y_edges.size if abs(dy) > eps else 0)
+    ts = np.zeros(ts_size, dtype=np.float64)
+    ts[0] = 0.0
+    ts[1] = 1.0
+    idx = 2
+    
     if abs(dx) > eps:
-        ts.extend(((x_edges - x1) / dx).tolist())
+        for xe in x_edges:
+            ts[idx] = (xe - x1) / dx
+            idx += 1
     if abs(dy) > eps:
-        ts.extend(((y_edges - y1) / dy).tolist())
-
-    t = np.asarray(ts, dtype=np.float64)
-    t = t[(t >= -eps) & (t <= 1.0 + eps)]
+        for ye in y_edges:
+            ts[idx] = (ye - y1) / dy
+            idx += 1
+    
+    # 裁剪到有效范围
+    t = ts[(ts >= -eps) & (ts <= 1.0 + eps)]
     t = np.clip(t, 0.0, 1.0)
-
-    t = np.unique(np.round(t / eps).astype(np.int64)) * eps
+    
+    # 去重和排序
+    # 使用Numba支持的方式进行round操作
+    t_rounded = np.zeros(t.size, dtype=np.float64)
+    for i in range(t.size):
+        t_rounded[i] = eps * np.round(t[i] / eps)
+    
+    t = np.unique(t_rounded)
     t = np.clip(t, 0.0, 1.0)
-    t.sort()
+    t = np.sort(t)
 
-    pts = np.column_stack([x1 + t * dx, y1 + t * dy])
-    if pts.shape[0] < 2:
-        return pts, np.array([], dtype=np.float64), np.empty((0, 2), dtype=np.int64)
+    # 计算端点
+    n_pts = t.size
+    pts = np.empty((n_pts, 2), dtype=np.float64)
+    for i in range(n_pts):
+        pts[i, 0] = x1 + t[i] * dx
+        pts[i, 1] = y1 + t[i] * dy
+    
+    if n_pts < 2:
+        # Numba在nopython模式下无法处理空数组，返回具有最小有效尺寸的数组
+        return pts, np.array([0.0], dtype=np.float64)[:0], np.array([[0, 0]], dtype=np.int64)[:0]
 
-    dxy = np.diff(pts, axis=0)
-    seg_len = np.sqrt(np.sum(dxy**2, axis=1))
-
-    mid = 0.5 * (pts[:-1] + pts[1:])
-    ix = np.searchsorted(x_edges, mid[:, 0], side="right") - 1
-    iy = np.searchsorted(y_edges, mid[:, 1], side="right") - 1
+    # 计算分段长度
+    n_segs = n_pts - 1
+    seg_len = np.empty(n_segs, dtype=np.float64)
+    mid = np.empty((n_segs, 2), dtype=np.float64)
+    
+    for i in range(n_segs):
+        dx_seg = pts[i+1, 0] - pts[i, 0]
+        dy_seg = pts[i+1, 1] - pts[i, 1]
+        seg_len[i] = np.sqrt(dx_seg**2 + dy_seg**2)
+        
+        # 计算中点
+        mid[i, 0] = 0.5 * (pts[i, 0] + pts[i+1, 0])
+        mid[i, 1] = 0.5 * (pts[i, 1] + pts[i+1, 1])
+    
+    # 计算中点所在的cell
+    ix = np.empty(n_segs, dtype=np.int64)
+    iy = np.empty(n_segs, dtype=np.int64)
+    
+    for i in range(n_segs):
+        # 使用二分查找确定网格索引
+        # 对于Numba，手动实现二分查找比np.searchsorted更快
+        # 查找x索引
+        x = mid[i, 0]
+        left, right = 0, x_edges.size - 1
+        while left < right:
+            mid_x = (left + right) // 2
+            if x_edges[mid_x] < x:
+                left = mid_x + 1
+            else:
+                right = mid_x
+        ix[i] = left - 1
+        
+        # 查找y索引
+        y = mid[i, 1]
+        left, right = 0, y_edges.size - 1
+        while left < right:
+            mid_y = (left + right) // 2
+            if y_edges[mid_y] < y:
+                left = mid_y + 1
+            else:
+                right = mid_y
+        iy[i] = left - 1
+    
+    # 裁剪到有效范围
     ix = np.clip(ix, 0, x_edges.size - 2)
     iy = np.clip(iy, 0, y_edges.size - 2)
-
-    cell_ij = np.column_stack([ix, iy]).astype(np.int64)
+    
+    cell_ij = np.column_stack((ix, iy))
     return pts, seg_len, cell_ij

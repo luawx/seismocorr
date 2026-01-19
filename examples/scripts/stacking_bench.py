@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 
 import numpy as np
 from seismocorr.utils.io import scan_h5_files, read_zdh5
-from seismocorr.core.correlation import batch_cross_correlation
+from seismocorr.core.correlation import CorrelationConfig, BatchCorrelator
 from seismocorr.core.stacking import stack_ccfs
 import matplotlib.pyplot as plt
 from tqdm import tqdm
@@ -65,32 +65,37 @@ def process_single_file(filepath):
 
         # 步骤4: 设置互相关参数，与cc_benchmark保持一致
         # 外层使用顺序处理，内层使用并行处理，避免嵌套并行
-        correlation_params = {
-            'method': 'freq-domain',
-            'time_normalize': 'ramn',
-            'freq_normalize': 'whiten',
-            'freq_band': (0.5, 40),
-            'max_lag': 5.0,
-            'nfft': None,
-            'sampling_rate': fs,
-            'time_norm_kwargs': {'fmin': 1, 'Fs': fs, 'norm_win': 0.5},
-            'freq_norm_kwargs': {'smooth_win': 20},
-            'n_jobs': -1,  # 使用并行计算，充分利用多核CPU
-            'parallel_backend': 'thread',  # 线程后端，避免进程创建开销
-            'use_cache': False  # 禁用缓存以节省内存
-        }
+        correlation_config = CorrelationConfig(
+            method='freq-domain',
+            time_normalize='ramn',
+            freq_normalize='whiten',
+            freq_band=(0.5, 40),
+            max_lag=5.0,
+            nfft=None,
+            time_norm_kwargs={'fmin': 1, 'Fs': fs, 'norm_win': 0.5},
+            freq_norm_kwargs={'smooth_win': 20}
+        )
 
         # 步骤5: 计算批量互相关
         start_cc_time = time.time()
-        results = batch_cross_correlation(
+        batch_correlator = BatchCorrelator()
+        lags, ccfs, keys = batch_correlator.batch_cross_correlation(
             traces=traces,
             pairs=pairs,
-            **correlation_params
+            sampling_rate=fs,
+            n_jobs=-1,  # 使用并行计算，充分利用多核CPU
+            parallel_backend='thread',  # 线程后端，避免进程创建开销
+            config=correlation_config
         )
         end_cc_time = time.time()
 
+        # 将结果转换为字典格式，与原有代码兼容
+        results = {}
+        for i, key in enumerate(keys):
+            results[key] = (lags, ccfs[i])
+
         # 清理不再使用的变量
-        del traces, pairs
+        del traces, pairs, lags, ccfs, keys
         gc.collect()  # 强制垃圾回收
 
         return results
@@ -257,10 +262,8 @@ def main():
     
     # 使用tqdm显示进度
     for i, filepath in enumerate(tqdm(files_to_process, total=len(files_to_process), desc="Processing Files")):
-        print(filepath)
         # 打印当前内存使用情况
         current_mem = get_memory_usage()
-        tqdm.write(f"处理文件 {i+1}/{len(files_to_process)}，当前内存使用: {current_mem:.2f} MB")
         
         start_file_time = time.time()
         result = process_single_file(filepath)
@@ -283,8 +286,6 @@ def main():
             gc.collect()
 
     print(f"成功处理 {valid_files_count} 个文件")
-    print(f"合并结果后内存使用: {get_memory_usage():.2f} MB")
-    print(f"垃圾回收后内存使用: {get_memory_usage():.2f} MB")
 
     if valid_files_count == 0:
         print("没有有效结果，退出...")

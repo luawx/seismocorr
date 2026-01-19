@@ -381,16 +381,17 @@ def get_freq_normalizer(name: str, **kwargs) -> FreqNormalizer:
     获取频域归一化器实例
 
     Args:
-        name: 方法名 ('whiten', 'rma', 'bandwhiten', 'no')
+        name: 方法名 ('whiten', 'rma', 'bandwhiten', 'no', 'powerlaw', 'bandwise', 'refspectrum', 'clipwhiten')
         **kwargs: 如 smooth_win, alpha, freq_min, freq_max, Fs
 
     Returns:
         FreqNormalizer 实例
     """
-    cls = _FREQ_NORM_MAP.get(name.lower())
+    name_lower = name.lower()
+    cls = _FREQ_NORM_MAP.get(name_lower)
     if cls is None:
-        raise ValueError(f"Unknown frequency normalization method: '{name}'. "
-                       f"Choose from {list(_FREQ_NORM_MAP.keys())}")
+        available_methods = list(_FREQ_NORM_MAP.keys())
+        raise ValueError(f"未知的频域归一化方法: '{name}'. 请从以下方法中选择: {', '.join(available_methods)}")
 
     # 根据方法名传递特定参数
     if name.lower() == 'whiten':

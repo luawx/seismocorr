@@ -11,7 +11,6 @@ import numpy as np
 from abc import ABC, abstractmethod
 from typing import List, Union, Callable
 from scipy.signal import hilbert
-from scipy.fftpack import next_fast_len
 
 # 类型别名
 ArrayLike = Union[np.ndarray, List[float], List[np.ndarray]]
@@ -83,6 +82,9 @@ class PhaseWeightedStack(StackingStrategy):
     相位加权叠加（PWS）
     Ref: Schimmel and Palssen, 1997
     使用相位一致性作为权重：一致性越高，权重越大
+
+    参数:
+        power: 相位一致性的幂次，用于调整权重的非线性程度
     """
     def __init__(self,power=2):
         self.power = power
@@ -90,10 +92,13 @@ class PhaseWeightedStack(StackingStrategy):
     def stack(self, ccf_list: List[np.ndarray]) -> np.ndarray:
         ccfs = np.array(ccf_list)
         N,M = ccfs.shape
-        analytic = hilbert(ccfs, axis=1, N=next_fast_len(M))
+        # 计算解析信号，获取相位信息
+        analytic = hilbert(ccfs, axis=1)  # 不使用next_fast_len，直接使用原始长度
         phase = np.angle(analytic)
+        # 计算相位一致性
         phase_stack = np.mean(np.exp(1j*phase), axis=0)
         phase_stack = np.abs(phase_stack)**self.power
+        # 应用相位权重并叠加
         weighted = np.multiply(ccfs, phase_stack)
         return np.mean(weighted, axis=0)
 
