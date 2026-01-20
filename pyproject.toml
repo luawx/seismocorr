@@ -9,7 +9,7 @@ name = "seismocorr"
 version = "0.1.1"
 description = "A scalable framework for seismic cross-correlation"
 authors = [{name = "Fu Tao", email = "1447805660@qq.com"},
-           {name = "He Chengtian", email = "1447805660@qq.com"},
+           {name = "He Chengtian", email = "zg_hct@163.com"},
            {name = "Xu Xiangyang", email = "1447805660@qq.com"},
            {name = "Jiang Yi", email = "1447805660@qq.com"}]
 readme = "README.md"

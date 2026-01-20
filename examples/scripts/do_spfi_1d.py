@@ -14,11 +14,10 @@ def main() -> None:
     sensor_xy = _sensor_grid_1d(nx=2000, width=width_m, jitter_std=2.0, rng=rng)
     n_sensors = int(sensor_xy.shape[0])
 
-    # 反演网格 + 真值棋盘（速度）
+    # 构建反演网格 + 真值速度棋盘
     grid_x = np.linspace(0.0, width_m, 401, dtype=np.float64)
-
     v0, dv = 3.0, 0.3
-    tile_size_m = 2000.0  # 2km 一块棋盘（你可以改）
+    tile_size_m = 2000.0  # 2km 一块棋盘
     v_true_x = _checkerboard_1d(grid_x, v0=v0, dv=dv, tile=tile_size_m)
 
     # 通道真值：把 grid_x 的真值采样到每个通道位置
@@ -28,7 +27,7 @@ def main() -> None:
     subarray = get_subarray("1d")(
         sensor_xy,
         n_realizations=4000,
-        window_length=100.0,  # 100m 窗
+        window_length=100.0,
         kmin=5,
         kmax=10,
         random_state=2026,
@@ -50,7 +49,7 @@ def main() -> None:
         .set_geometry("1d")
         .set_assumption("station_avg")
         .set_regularization("l2")
-        .set_l2(alpha=0.05)
+        .set_l2(alpha=0.1)
         .build()
     )
 
@@ -60,14 +59,6 @@ def main() -> None:
     # 反演结果插值到 grid_x 上，便于和真值对比
     v_inv_x = _idw_1d(sensor_xy, v_inv_sta, grid_x, power=2.0)
 
-    _plot_1x3_pcolormesh(
-        grid_x=grid_x,
-        sensor_xy=sensor_xy,
-        v_true=v_true_x,
-        v_inv=v_inv_x,
-        title=f"1D SPFI station_avg | freq={freqs[0]:.2f} Hz",
-    )
-    
     # 绘制一维结果对比图
     _plot_1d_results(
         grid_x=grid_x,
@@ -94,14 +85,6 @@ def main() -> None:
     v_inv_ray = _get_velocity_row(out_ray, row=0)
     v_inv_ray_x = _idw_1d(sensor_xy, v_inv_ray, grid_x, power=2.0)
 
-    _plot_1x3_pcolormesh(
-        grid_x=grid_x,
-        sensor_xy=sensor_xy,
-        v_true=v_true_x,
-        v_inv=v_inv_ray_x,
-        title=f"1D SPFI ray_avg | freq={freqs[0]:.2f} Hz",
-    )
-    
     # 绘制一维结果对比图
     _plot_1d_results(
         grid_x=grid_x,
@@ -184,75 +167,20 @@ def _centers_to_edges_1d(xc: np.ndarray) -> np.ndarray:
     return edges
 
 
-def _plot_1x3_pcolormesh(
-    *,
-    grid_x: np.ndarray,
-    sensor_xy: np.ndarray,
-    v_true: np.ndarray,
-    v_inv: np.ndarray,
-    title: str,
-) -> None:
-    gx = np.asarray(grid_x, dtype=np.float64).reshape(-1)
-    vt = np.asarray(v_true, dtype=np.float64).reshape(-1)
-    vi = np.asarray(v_inv, dtype=np.float64).reshape(-1)
-    if vt.size != gx.size or vi.size != gx.size:
-        raise ValueError("v_true / v_inv 的长度必须与 grid_x 一致。")
-
-    diff = vi - vt
-
-    # 设置中文字体
-    plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
-    plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
-    
-    # 统一色标
-    vmin = float(min(vt.min(), vi.min()))
-    vmax = float(max(vt.max(), vi.max()))
-
-    # pcolormesh 需要 edges（nx+1, ny+1）
-    x_edges = _centers_to_edges_1d(gx)
-    y_edges = np.array([0.0, 1.0], dtype=np.float64)
-
-    C_true = vt.reshape(1, -1)
-    C_inv = vi.reshape(1, -1)
-    C_diff = diff.reshape(1, -1)
-
-    fig, axes = plt.subplots(1, 3, figsize=(14, 4), constrained_layout=True)
-    fig.suptitle(title)
-
-    im0 = axes[0].pcolormesh(x_edges, y_edges, C_true, shading="flat", vmin=vmin, vmax=vmax)
-    axes[0].set_title("真实值")
-    plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
-
-    im1 = axes[1].pcolormesh(x_edges, y_edges, C_inv, shading="flat", vmin=vmin, vmax=vmax)
-    axes[1].set_title("反演值")
-    plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
-
-    im2 = axes[2].pcolormesh(x_edges, y_edges, C_diff, shading="flat")
-    axes[2].set_title("差值")
-    plt.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
-
-    for ax in axes:
-        ax.set_xlabel("x (m)")
-        ax.set_ylabel("y (dummy)")
-        ax.set_ylim(0.0, 1.0)
-
-    plt.show()
-
-
 def _plot_1d_results(
-    *,
-    grid_x: np.ndarray,
-    sensor_xy: np.ndarray,
-    v_true_x: np.ndarray,
-    v_true_sta: np.ndarray,
-    d_obs: np.ndarray,
-    v_inv_x: np.ndarray,
-    subarray,
-    title: str,
+        *,
+        grid_x: np.ndarray,
+        sensor_xy: np.ndarray,
+        v_true_x: np.ndarray,
+        v_true_sta: np.ndarray,
+        d_obs: np.ndarray,
+        v_inv_x: np.ndarray,
+        subarray,
+        title: str,
 ) -> None:
     """
     绘制一维结果对比：真实值、观测值+反演值、差值
-    
+
     Args:
         grid_x: 网格中心点坐标
         sensor_xy: 传感器坐标
@@ -270,30 +198,30 @@ def _plot_1d_results(
     obs = np.asarray(d_obs, dtype=np.float64).reshape(-1)
     vix = np.asarray(v_inv_x, dtype=np.float64).reshape(-1)
     sx = np.asarray(sensor_xy, dtype=np.float64).reshape(-1)
-    
+
     # 确保数据长度一致
     if vtx.size != gx.size or vix.size != gx.size:
         raise ValueError("v_true_x / v_inv_x 的长度必须与 grid_x 一致。")
-    
+
     # 创建子阵列中心点坐标用于观测值的横坐标
     # 由于观测值是子阵列的平均值，我们需要计算每个子阵列的中心点
     subarray_centers = np.array([np.mean(sx[np.array(s).reshape(-1)]) for s in subarray])
-    
+
     # 设置中文字体
     plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
     plt.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
-    
+
     # 创建绘图
     fig, axes = plt.subplots(3, 1, figsize=(12, 8), constrained_layout=True)
     fig.suptitle(title, fontsize=14)
-    
+
     # 第一行：真实值
     axes[0].plot(gx, vtx, color='black', linewidth=2, label='真实值')
     axes[0].set_ylabel('速度 (km/s)')
     axes[0].set_title('(1) 真实速度分布')
     axes[0].grid(True, alpha=0.3)
     axes[0].legend()
-    
+
     # 第二行：观测值和反演值
     axes[1].plot(gx, vtx, color='black', linewidth=2, label='真实值', alpha=0.5)
     axes[1].scatter(subarray_centers, obs, color='blue', s=10, alpha=0.5, label='有噪声的观测值')
@@ -303,13 +231,13 @@ def _plot_1d_results(
     axes[1].set_title('(2) 观测值与反演值对比')
     axes[1].grid(True, alpha=0.3)
     axes[1].legend()
-    
+
     # 第三行：差值
     # 计算观测值与真实值的差值
     v_true_obs = np.interp(subarray_centers, gx, vtx)
     obs_diff = obs - v_true_obs
     inv_diff = vix - vtx
-    
+
     axes[2].plot(gx, np.zeros_like(gx), color='black', linestyle='--', alpha=0.5)
     axes[2].scatter(subarray_centers, obs_diff, color='blue', s=10, alpha=0.5, label='观测值 - 真实值')
     axes[2].plot(gx, inv_diff, color='red', linewidth=2, label='反演值 - 真实值')
@@ -318,7 +246,7 @@ def _plot_1d_results(
     axes[2].set_title('(3) 观测值和反演值与真实值的差值')
     axes[2].grid(True, alpha=0.3)
     axes[2].legend()
-    
+
     plt.show()
 
 
