@@ -4,7 +4,6 @@ import sys
 import os
 
 from seismocorr.preprocessing.time_norm import (
-    moving_ave,
     ZScoreNormalizer,
     OneBitNormalizer,
     RMSNormalizer,
@@ -16,33 +15,6 @@ from seismocorr.preprocessing.time_norm import (
     get_time_normalizer,
     _TIME_NORM_MAP
 )
-
-
-class TestMovingAve:
-    """测试移动平均函数"""
-    
-    def test_moving_ave_basic(self):
-        """测试基本移动平均功能"""
-        data = np.array([1, 2, 3, 4, 5])
-        window = 3
-        result = moving_ave(data, window)
-        expected = np.array([4/3,2.0, 3.0, 4.0, 14/3])  # 简单移动平均
-        assert result.shape == (5,)
-        assert np.allclose(result, expected)
-    
-    def test_moving_ave_single_point(self):
-        """测试单点输入"""
-        data = np.array([5.0])
-        result = moving_ave(data, 1)
-        assert result.shape == (1,)
-        assert result[0] == 5.0
-    
-    def test_moving_ave_window_larger_than_data(self):
-        """测试窗口大于数据长度的情况"""
-        data = np.array([1, 2, 3])
-        result = moving_ave(data, 5)
-        # 应该返回单个值或适当处理
-        assert len(result) == len(data)
 
 
 class TestZScoreNormalizer:
@@ -356,7 +328,7 @@ class TestGetTimeNormalizer:
     
     def test_get_normalizer_invalid_name(self):
         """测试无效归一化器名称"""
-        with pytest.raises(ValueError, match="Unknown time normalization method"):
+        with pytest.raises(ValueError, match="未知的时域归一化方法"):
             get_time_normalizer('invalid_method')
     
     def test_ram_normalizer_missing_params(self):

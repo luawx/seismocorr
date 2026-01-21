@@ -715,8 +715,8 @@ class DispersionSpectrumGUI:
 
 def main():
     parser = argparse.ArgumentParser(description="Select dispersion spectrums (GUI with modes)")
-    parser.add_argument("--infile", default="ds.h5", help="input file[ds.h5]")
-    parser.add_argument("--outfile", default="config.yml", help="config file[config.yml]")
+    parser.add_argument("--infile", default="examples/test_disper_picker_data/ds.h5", help="input file[ds.h5]")
+    parser.add_argument("--outfile", default="examples/test_disper_picker_data/config.yml", help="config file[config.yml]")
     args = parser.parse_args()
 
     with h5py.File(args.infile, "r") as h5:

@@ -26,6 +26,8 @@ dependencies = [
     "scipy>=1.7.0",
     "h5py>=3.0.0",
     "numba>=0.55.0",
+    "PyWavelets>=1.8.0",
+    "PyYAML>=0.2.5",
 ]
 
 [project.optional-dependencies]

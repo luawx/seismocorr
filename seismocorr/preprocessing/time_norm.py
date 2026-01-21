@@ -13,6 +13,7 @@ import pywt
 
 ArrayLike = Union[np.ndarray, list]
 
+
 class TimeNormalizer(ABC):
     """时域归一化抽象基类"""
     @abstractmethod
