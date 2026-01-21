@@ -356,7 +356,7 @@ class TestGetTimeNormalizer:
     
     def test_get_normalizer_invalid_name(self):
         """测试无效归一化器名称"""
-        with pytest.raises(ValueError, match="Unknown time normalization method"):
+        with pytest.raises(ValueError, match="未知的时域归一化方法"):
             get_time_normalizer('invalid_method')
     
     def test_ram_normalizer_missing_params(self):
