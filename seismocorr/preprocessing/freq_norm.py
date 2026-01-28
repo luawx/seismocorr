@@ -28,15 +28,23 @@ class FreqNormalizer(ABC):
         pass
 
     def __call__(self, data):
+        data = np.asarray(data)
+        if data.ndim != 1:
+            raise ValueError(f"data 必须是一维时域信号，当前 shape={data.shape}")
         return self.apply(data)
     def _check_empty_input(self, data: np.ndarray) -> bool:
         """检查输入是否为空数组"""
-        return len(data) == 0
+        data = np.asarray(data)
+        return data.size == 0
 
 
 class SpectralWhitening(FreqNormalizer):
     """谱白化（Spectral Whitening）"""
     def __init__(self, smooth_win: int = 20):
+        if isinstance(smooth_win, bool) or not isinstance(smooth_win, int):
+            raise TypeError(f"smooth_win 类型应为 int，当前为 {type(smooth_win).__name__}: {smooth_win!r}")
+        if smooth_win < 1:
+            raise ValueError(f"smooth_win 应 >= 1，当前为 {smooth_win!r}")
         self.smooth_win = smooth_win
 
     def _smooth(self, x: np.ndarray) -> np.ndarray:
@@ -89,6 +97,19 @@ class SpectralWhitening(FreqNormalizer):
 class BandWhitening(FreqNormalizer):
     """频带白化（Band Whitening）"""
     def __init__(self, freq_min: float, freq_max: float, Fs: float):
+        for name, v in [("freq_min", freq_min), ("freq_max", freq_max), ("Fs", Fs)]:
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise TypeError(f"{name} 应为数值类型，当前为 {type(v).__name__}: {v!r}")
+            if not np.isfinite(v):
+                raise ValueError(f"{name} 不能是 NaN/Inf，当前为 {v!r}")
+
+        freq_min = float(freq_min)
+        freq_max = float(freq_max)
+        Fs = float(Fs)
+
+        if Fs <= 0:
+            raise ValueError(f"Fs 必须 > 0，当前为 {Fs!r}")
+
         self.fmin = freq_min
         self.fmax = freq_max
         self.Fs = Fs
@@ -160,6 +181,12 @@ class BandWhitening(FreqNormalizer):
 class RmaFreqNorm(FreqNormalizer):
     """递归移动平均白化 (Recursive Moving Average Whitening)"""
     def __init__(self, alpha: float = 0.9):
+        if isinstance(alpha, bool) or not isinstance(alpha, (int, float)):
+            raise TypeError(f"alpha 应为数值类型，当前为 {type(alpha).__name__}: {alpha!r}")
+        alpha = float(alpha)
+        if not (0.0 < alpha < 1.0):
+            raise ValueError(f"alpha 建议在 (0,1) 内，当前为 {alpha!r}")
+
         self.alpha = alpha  # 平滑系数
         self.avg_power = None
 
@@ -220,6 +247,12 @@ class PowerLawWhitening(FreqNormalizer):
             raise ValueError("alpha must be in [0, 1]")
         self.alpha = alpha
         self.eps = eps
+        if isinstance(eps, bool) or not isinstance(eps, (int, float)):
+            raise TypeError(f"eps 应为数值类型，当前为 {type(eps).__name__}: {eps!r}")
+        eps = float(eps)
+        if eps <= 0 or (not np.isfinite(eps)):
+            raise ValueError(f"eps 必须是有限正数，当前为 {eps!r}")
+        self.eps = eps
 
     def apply(self, data: np.ndarray) -> np.ndarray:
         if self._check_empty_input(data):
@@ -255,6 +288,25 @@ class BandwiseFreqNorm(FreqNormalizer):
             Fs: 采样率
             method: 'rms' or 'mean'
         """
+        if isinstance(Fs, bool) or not isinstance(Fs, (int, float)):
+            raise TypeError(f"Fs 应为数值类型，当前为 {type(Fs).__name__}: {Fs!r}")
+        Fs = float(Fs)
+        if Fs <= 0 or (not np.isfinite(Fs)):
+            raise ValueError(f"Fs 应为有限正数，当前为 {Fs!r}")
+
+        if not isinstance(bands, (list, tuple)) or len(bands) == 0:
+            raise TypeError("bands 应为非空列表/元组，例如 [(fmin,fmax), ...]")
+        for b in bands:
+            if not isinstance(b, (list, tuple)) or len(b) != 2:
+                raise ValueError(f"bands 每个元素应为 (fmin,fmax)，当前为 {b!r}")
+            fmin, fmax = b
+            if float(fmin) >= float(fmax):
+                raise ValueError(f"bands 内必须满足 fmin < fmax，当前为 {b!r}")
+
+        eps = float(eps)
+        if eps <= 0 or (not np.isfinite(eps)):
+            raise ValueError(f"eps 应为有限正数，当前为 {eps!r}")
+
         self.bands = bands
         self.Fs = Fs
         self.method = method
@@ -303,6 +355,15 @@ class ReferenceSpectrumNorm(FreqNormalizer):
         ref_spectrum: np.ndarray,
         eps: float = 1e-10
     ):
+        ref_spectrum = np.asarray(ref_spectrum)
+        if ref_spectrum.ndim != 1 or ref_spectrum.size == 0:
+            raise ValueError(f"ref_spectrum 应为一维非空数组，当前 shape={ref_spectrum.shape}")
+        if not np.all(np.isfinite(ref_spectrum)):
+            raise ValueError("ref_spectrum 不能包含 NaN/Inf")
+
+        eps = float(eps)
+        if eps <= 0 or (not np.isfinite(eps)):
+            raise ValueError(f"eps 应为有限正数，当前为 {eps!r}")
 
         self.ref_spectrum = ref_spectrum
         self.eps = eps
@@ -336,6 +397,19 @@ class ClippedSpectralWhitening(FreqNormalizer):
         min_weight: float = 0.1,
         max_weight: float = 10.0
     ):
+        if isinstance(smooth_win, bool) or not isinstance(smooth_win, int):
+            raise TypeError(f"smooth_win 类型应为 int，当前为 {type(smooth_win).__name__}: {smooth_win!r}")
+        if smooth_win < 1:
+            raise ValueError(f"smooth_win 应 >= 1，当前为 {smooth_win!r}")
+
+        min_weight = float(min_weight)
+        max_weight = float(max_weight)
+        if min_weight <= 0 or (not np.isfinite(min_weight)):
+            raise ValueError(f"min_weight 应为有限正数，当前为 {min_weight!r}")
+        if max_weight < min_weight or (not np.isfinite(max_weight)):
+            raise ValueError("max_weight 应为有限值且 >= min_weight")
+
+
         self.smooth_win = smooth_win
         self.min_weight = min_weight
         self.max_weight = max_weight
@@ -387,20 +461,25 @@ def get_freq_normalizer(name: str, **kwargs) -> FreqNormalizer:
     Returns:
         FreqNormalizer 实例
     """
-    name_lower = name.lower()
+    if not isinstance(name, str):
+        raise TypeError(f"name 类型应为 str，当前为 {type(name).__name__}: {name!r}")
+    if not name.strip():
+        raise ValueError("name 不能为空字符串")
+    name_lower = name.strip().lower()
+
     cls = _FREQ_NORM_MAP.get(name_lower)
     if cls is None:
         available_methods = list(_FREQ_NORM_MAP.keys())
         raise ValueError(f"未知的频域归一化方法: '{name}'. 请从以下方法中选择: {', '.join(available_methods)}")
 
     # 根据方法名传递特定参数
-    if name.lower() == 'whiten':
+    if name_lower == 'whiten':
         smooth_win = kwargs.get('smooth_win', 20)
         return cls(smooth_win=smooth_win)
-    elif name.lower() == 'rma':
+    elif name_lower == 'rma':
         alpha = kwargs.get('alpha', 0.9)
         return cls(alpha=alpha)
-    elif name.lower() == 'bandwhiten':
+    elif name_lower == 'bandwhiten':
         # BandWhitening 需要特定参数
         freq_min = kwargs.get('freq_min')
         freq_max = kwargs.get('freq_max')
@@ -411,10 +490,10 @@ def get_freq_normalizer(name: str, **kwargs) -> FreqNormalizer:
             
         return cls(freq_min=freq_min, freq_max=freq_max, Fs=Fs)
     
-    elif name.lower() == 'powerlaw':
+    elif name_lower == 'powerlaw':
         return cls(alpha=kwargs.get('alpha', 0.5))
     
-    elif name.lower() == 'bandwise':
+    elif name_lower == 'bandwise':
         # BandwiseFreqNorm 需要特定参数
         bands = kwargs.get('bands')
         Fs = kwargs.get('Fs')
@@ -428,7 +507,7 @@ def get_freq_normalizer(name: str, **kwargs) -> FreqNormalizer:
             method=kwargs.get('method', 'rms')
         )
     
-    elif name.lower() == 'refspectrum':
+    elif name_lower == 'refspectrum':
         # ReferenceSpectrumNorm 需要特定参数
         ref_spectrum = kwargs.get('ref_spectrum')
         
@@ -437,7 +516,7 @@ def get_freq_normalizer(name: str, **kwargs) -> FreqNormalizer:
             
         return cls(ref_spectrum=ref_spectrum)
     
-    elif name.lower() == 'clipwhiten':
+    elif name_lower == 'clipwhiten':
         return cls(
             smooth_win=kwargs.get('smooth_win', 20),
             min_weight=kwargs.get('min_weight', 0.1),

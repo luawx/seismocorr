@@ -46,9 +46,20 @@ def run_spfi(
     """
     cfg.validate()
 
+    if not isinstance(sensor_xy, np.ndarray):
+        raise TypeError(f"sensor_xy 类型应为 np.ndarray，当前为 {type(sensor_xy).__name__}")
+    if subarray is None:
+        raise TypeError("subarray 不能为 None")
+    if not isinstance(subarray, (list, tuple)):
+        raise TypeError(f"subarray 类型应为 list/tuple，当前为 {type(subarray).__name__}")
+
     d = np.asarray(d_obs, dtype=np.float64)
     f = np.asarray(freqs, dtype=np.float64).reshape(-1)
 
+    if d.size > 0 and (not np.all(np.isfinite(d))):
+        raise ValueError("d_obs 包含 NaN/Inf")
+    if f.size > 0 and (not np.all(np.isfinite(f))):
+        raise ValueError("freqs 包含 NaN/Inf")
     if d.ndim != 2:
         raise ValueError("d_obs 必须是二维数组，shape=(n_freq, n_subarray)。")
     if f.size != d.shape[0]:
@@ -94,19 +105,19 @@ def run_spfi(
             v_model = np.asarray(res["x"], dtype=np.float64).reshape(-1)
 
             velocity_out[fi, :] = v_model
-            slowness_out[fi, :] = _safe_slowness_from_velocity(v_model)
+            slowness_out[fi, :] = _safe_inverse(v_model)
 
         else:
             # ray_avg：慢度域线性反演
             # s_sub ≈ A @ s_grid
-            s_sub = _safe_slowness_from_velocity(v_sub)
+            s_sub = _safe_inverse(v_sub)
             x0 = np.full(n_model, float(np.mean(s_sub)), dtype=np.float64)
 
             res = inv(A=A, d=s_sub, x0=x0, alpha=alpha, beta=beta)  # <- call
             s_model = np.asarray(res["x"], dtype=np.float64).reshape(-1)
 
             slowness_out[fi, :] = s_model
-            velocity_out[fi, :] = _safe_velocity_from_slowness(s_model)
+            velocity_out[fi, :] = _safe_inverse(s_model)
 
     out = {
         "subarray": subarray,
@@ -125,11 +136,7 @@ def run_spfi(
 # 辅助函数
 # ====================
 
-def _safe_slowness_from_velocity(v: np.ndarray, eps: float = 1e-12) -> np.ndarray:
-    v = np.asarray(v, dtype=np.float64)
-    return 1.0 / np.maximum(v, eps)
-
-
-def _safe_velocity_from_slowness(s: np.ndarray, eps: float = 1e-12) -> np.ndarray:
-    s = np.asarray(s, dtype=np.float64)
-    return 1.0 / np.maximum(s, eps)
+def _safe_inverse(x: np.ndarray, eps: float = 1e-12) -> np.ndarray:
+    """安全求倒数：用于 v<->s 的互转，避免除零。"""
+    x = np.asarray(x, dtype=np.float64)
+    return 1.0 / np.maximum(x, eps)

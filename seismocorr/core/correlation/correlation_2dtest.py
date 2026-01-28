@@ -24,6 +24,7 @@ from seismocorr.preprocessing.normal_func2d import demean as demean_2d
 from seismocorr.preprocessing.normal_func2d import detrend as detrend_2d
 from seismocorr.preprocessing.normal_func2d import taper as taper_2d
 from seismocorr.preprocessing.time_norm2d import get_time_normalizer_2d
+from seismocorr.config.default import SUPPORTED_METHODS, NORMALIZATION_OPTIONS
 
 # 优化库导入
 try:
@@ -50,12 +51,6 @@ ArrayLike = Union[np.ndarray, List[float]]
 LagsAndCCF2D = Tuple[
     np.ndarray, np.ndarray
 ]  # (lags, ccf_matrix)，ccf_matrix形状为(n_signals, 2*max_lag_samples+1)
-
-
-# -----------------------------# 核心算法枚举
-# -----------------------------
-SUPPORTED_METHODS = ["time-domain", "freq-domain", "deconv", "coherency"]
-NORMALIZATION_OPTIONS = ["zscore", "one-bit", "rms", "no"]
 
 
 # -----------------------------# 主要函数：compute_cross_correlation_2d
@@ -93,6 +88,98 @@ def compute_cross_correlation_2d(
         lags: 时间滞后数组 (单位：秒)，形状为 (2*max_lag_samples+1,)
         ccf_matrix: 互相关函数值矩阵，形状为 (n_signals, 2*max_lag_samples+1)
     """
+
+    if isinstance(sampling_rate, bool) or not isinstance(sampling_rate, (int, float)):
+        raise TypeError(
+            f"sampling_rate 必须是数字(Hz)，当前为 {type(sampling_rate).__name__}: {sampling_rate!r}"
+        )
+    if not np.isfinite(float(sampling_rate)) or float(sampling_rate) <= 0:
+        raise ValueError(f"sampling_rate 必须为有限且 > 0 的数(Hz)，当前为: {sampling_rate!r}")
+    sampling_rate = float(sampling_rate)
+
+    if not isinstance(method, str):
+        raise TypeError(f"method 必须是 str，当前为 {type(method).__name__}: {method!r}")
+    if method not in SUPPORTED_METHODS:
+        raise ValueError(f"不支持的计算方法: {method!r}。请从 {SUPPORTED_METHODS} 中选择")
+
+    if not isinstance(time_normalize, str):
+        raise TypeError(
+            f"time_normalize 必须是 str，当前为 {type(time_normalize).__name__}: {time_normalize!r}"
+        )
+    if time_normalize not in NORMALIZATION_OPTIONS:
+        raise ValueError(
+            f"time_normalize 必须是 {NORMALIZATION_OPTIONS} 之一，当前为: {time_normalize!r}"
+        )
+    if not isinstance(freq_normalize, str):
+        raise TypeError(
+            f"freq_normalize 必须是 str，当前为 {type(freq_normalize).__name__}: {freq_normalize!r}"
+        )
+    if freq_normalize not in NORMALIZATION_OPTIONS:
+        raise ValueError(
+            f"freq_normalize 必须是 {NORMALIZATION_OPTIONS} 之一，当前为: {freq_normalize!r}"
+        )
+    if freq_norm_kwargs not in (None,) and not isinstance(freq_norm_kwargs, dict):
+        raise TypeError(
+            f"freq_norm_kwargs 必须是 dict 或 None，当前为 {type(freq_norm_kwargs).__name__}"
+        )
+
+    if time_norm_kwargs not in (None,) and not isinstance(time_norm_kwargs, dict):
+        raise TypeError(
+            f"time_norm_kwargs 必须是 dict 或 None，当前为 {type(time_norm_kwargs).__name__}"
+        )
+
+    if freq_band is not None:
+        if not (isinstance(freq_band, (tuple, list)) and len(freq_band) == 2):
+            raise TypeError(f"freq_band 必须是 (fmin, fmax) 或 None，当前为: {freq_band!r}")
+        fmin, fmax = freq_band
+        fmin = float(fmin)
+        fmax = float(fmax)
+        if (not np.isfinite(fmin)) or (not np.isfinite(fmax)):
+            raise ValueError(f"freq_band 必须是有限数值，当前为: {freq_band!r}")
+        if fmin <= 0 or fmax <= 0:
+            raise ValueError(f"freq_band 频率必须 > 0，当前为: {freq_band!r}")
+        if fmin >= fmax:
+            raise ValueError(f"freq_band 要求 fmin < fmax，当前为: {freq_band!r}")
+        nyquist = sampling_rate / 2.0
+        if fmax >= nyquist:
+            raise ValueError(
+                f"freq_band 的 fmax 必须 < Nyquist({nyquist:g}Hz)，当前为: {fmax!r}"
+            )
+
+    if max_lag is not None:
+        if isinstance(max_lag, bool) or not isinstance(max_lag, (int, float)):
+            raise TypeError(
+                f"max_lag 必须是 float/int 或 None，当前为 {type(max_lag).__name__}: {max_lag!r}"
+            )
+        max_lag = float(max_lag)
+        if not np.isfinite(max_lag) or max_lag < 0:
+            raise ValueError(f"max_lag 必须为有限且 >= 0 的秒数，当前为: {max_lag!r}")
+    if nfft is not None:
+        if isinstance(nfft, bool) or not isinstance(nfft, int):
+            raise TypeError(f"nfft 必须是 int 或 None，当前为 {type(nfft).__name__}: {nfft!r}")
+        if nfft <= 0:
+            raise ValueError(f"nfft 必须是正整数，当前为: {nfft!r}")
+
+    if not isinstance(x_matrix, np.ndarray):
+        raise TypeError(f"x_matrix 必须是 np.ndarray，当前为 {type(x_matrix).__name__}")
+    if not isinstance(y_matrix, np.ndarray):
+        raise TypeError(f"y_matrix 必须是 np.ndarray，当前为 {type(y_matrix).__name__}")
+
+    if x_matrix.ndim != 2:
+        raise ValueError(f"x_matrix 必须是二维数组 (n_signals, n_samples)，当前 ndim={x_matrix.ndim}")
+    if y_matrix.ndim != 2:
+        raise ValueError(f"y_matrix 必须是二维数组 (n_signals, n_samples)，当前 ndim={y_matrix.ndim}")
+
+    if not np.issubdtype(x_matrix.dtype, np.number):
+        raise TypeError(f"x_matrix dtype 必须是数值类型，当前为 {x_matrix.dtype}")
+    if not np.issubdtype(y_matrix.dtype, np.number):
+        raise TypeError(f"y_matrix dtype 必须是数值类型，当前为 {y_matrix.dtype}")
+
+    if not np.all(np.isfinite(x_matrix)):
+        raise ValueError("输入 x_matrix 包含 NaN/Inf")
+    if not np.all(np.isfinite(y_matrix)):
+        raise ValueError("输入 y_matrix 包含 NaN/Inf")
+
     # 验证输入矩阵形状
     if x_matrix.shape != y_matrix.shape:
         raise ValueError(
@@ -102,13 +189,23 @@ def compute_cross_correlation_2d(
     n_signals, n_samples = x_matrix.shape
 
     if n_signals == 0 or n_samples == 0:
-        return np.array([]), np.array([])
+        return (
+            np.array([], dtype=np.float64),
+            np.zeros((0, 0), dtype=np.float64),
+        )
 
     # 确定最大滞后
-    if not max_lag:
-        max_lag = min(n_samples, n_samples) / sampling_rate
+    if max_lag is None:
+        max_lag = n_samples / sampling_rate
 
     max_lag_samples = int(max_lag * sampling_rate)
+
+    # max_lag 上限不能超过 (n_samples - 1)
+    if max_lag_samples > (n_samples - 1):
+        raise ValueError(
+            f"max_lag 太大：对应样本数 {max_lag_samples} > n_samples-1({n_samples-1})。"
+            f"请调小 max_lag 或增大窗口长度。"
+        )
 
     # 初始化参数字典
     time_norm_kwargs = time_norm_kwargs or {}
@@ -177,6 +274,22 @@ def compute_cross_correlation_2d(
     else:
         raise ValueError(
             f"Unsupported method: {method}. Choose from {SUPPORTED_METHODS}"
+        )
+
+    lags = np.asarray(lags, dtype=np.float64)
+    ccf_matrix = np.asarray(ccf_matrix, dtype=np.float64)
+
+    if lags.ndim != 1:
+        raise RuntimeError(f"lags 必须是一维数组，当前 ndim={lags.ndim}")
+    if ccf_matrix.ndim != 2:
+        raise RuntimeError(f"ccf_matrix 必须是二维数组，当前 ndim={ccf_matrix.ndim}")
+    if ccf_matrix.shape[0] != n_signals:
+        raise RuntimeError(
+            f"ccf_matrix 第一维必须等于 n_signals={n_signals}，当前为: {ccf_matrix.shape}"
+        )
+    if ccf_matrix.shape[1] != len(lags):
+        raise RuntimeError(
+            f"输出不一致：ccf_matrix.shape[1]={ccf_matrix.shape[1]} != len(lags)={len(lags)}"
         )
 
     return lags, ccf_matrix

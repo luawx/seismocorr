@@ -549,6 +549,13 @@ class FKFanFilter(DASPreprocessor):
         self.mode = mode
         self.direction = direction
 
+        if self.pad_t < 0 or self.pad_x < 0:
+            raise ValueError("pad_t/pad_x 必须 >= 0")
+        if self.eps <= 0:
+            raise ValueError("eps 必须 > 0")
+        if isinstance(pad_t, bool) or isinstance(pad_x, bool) or isinstance(eps, bool):
+            raise TypeError("pad_t/pad_x/eps 类型有误")
+
         if self.mode not in ("pass", "reject"):
             raise ValueError('mode 只能是 "pass" 或 "reject"')
         if self.direction not in ("both", "pos_k", "neg_k"):
@@ -842,7 +849,13 @@ def get_das_preprocessor(name: str, **kwargs) -> DASPreprocessor:
     """
     工厂函数：创建 DAS 预处理器实例
     """
-    cls = _PREPROCESSOR_MAP.get(name.lower())
+    if not isinstance(name, str):
+        raise TypeError(f"name must be str, got {type(name).__name__}: {name!r}")
+    name = name.strip().lower()
+    if not name:
+        raise ValueError("name cannot be empty string")
+
+    cls = _PREPROCESSOR_MAP.get(name)
     if cls is None:
         raise ValueError(
             f"Unknown DAS preprocessor: '{name}'. Choose from {list(_PREPROCESSOR_MAP.keys())}"

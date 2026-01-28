@@ -13,12 +13,9 @@ from abc import ABC, abstractmethod
 from typing import List, Optional
 from matplotlib.path import Path
 from scipy.spatial import Voronoi
-
+from seismocorr.config.default import SUPPORTED_GEOMETRY
 
 Subarray = List[np.ndarray]
-
-
-SUPPORTED_GEOMETRY = ["1d", "2d"]
 
 
 class SubarrayBuilder(ABC):
@@ -69,6 +66,25 @@ class _Voronoi2DBuilder(SubarrayBuilder):
         **kwargs,
     ) -> Subarray:
 
+        if isinstance(n_realizations, bool) or not isinstance(n_realizations, int):
+            raise TypeError(f"n_realizations 类型应为 int，当前为 {type(n_realizations).__name__}: {n_realizations!r}")
+        if n_realizations <= 0:
+            raise ValueError(f"n_realizations 应 > 0，当前为: {n_realizations!r}")
+        for name, v in [("kmin", kmin), ("kmax", kmax), ("min_sensors", min_sensors)]:
+            if isinstance(v, bool) or not isinstance(v, int):
+                raise TypeError(f"{name} 类型应为 int，当前为 {type(v).__name__}: {v!r}")
+        if kmin < 1:
+            raise ValueError(f"kmin 应 >= 1，当前为: {kmin!r}")
+        if kmax < kmin:
+            raise ValueError(f"kmax 应 >= kmin，当前为: kmax={kmax!r}, kmin={kmin!r}")
+        if min_sensors < 2:
+            raise ValueError(f"min_sensors 应 >= 2，当前为: {min_sensors!r}")
+
+        if random_state is not None:
+            if isinstance(random_state, bool) or not isinstance(random_state, int):
+                raise TypeError(
+                    f"random_state 类型应为 int 或 None，当前为 {type(random_state).__name__}: {random_state!r}")
+
         xy = _validate_sensor_xy(sensor_xy, geometry="2d")
         rng = np.random.default_rng(random_state)
 
@@ -81,7 +97,7 @@ class _Voronoi2DBuilder(SubarrayBuilder):
         # 多次随机划分（n_realizations 次），每次可产生多个子阵列
         for _ in range(int(n_realizations)):
             # 每次随机选择一个 k，决定 Voronoi 分区数量
-            k = int(rng.integers(int(kmin), int(kmax)))
+            k = int(rng.integers(int(kmin), int(kmax) + 1))
 
             # 在包络框内生成 k 个随机种子点 (k,2)
             seeds = rng.random((k, 2))
@@ -134,6 +150,19 @@ class _RandomWindow1DBuilder(SubarrayBuilder):
         random_state: Optional[int] = None,
         **kwargs,
     ) -> Subarray:
+        if isinstance(n_realizations, bool) or not isinstance(n_realizations, int):
+            raise TypeError(f"n_realizations 类型应为 int，当前为 {type(n_realizations).__name__}: {n_realizations!r}")
+        if isinstance(window_length, bool) or not isinstance(window_length, (int, float)):
+            raise TypeError(f"window_length 类型有误，当前为 {type(window_length).__name__}: {window_length!r}")
+        if isinstance(kmin, bool) or not isinstance(kmin, int):
+            raise TypeError(f"kmin 类型应为 int，当前为 {type(kmin).__name__}: {kmin!r}")
+        if isinstance(kmax, bool) or not isinstance(kmax, int):
+            raise TypeError(f"kmax 类型应为 int，当前为 {type(kmax).__name__}: {kmax!r}")
+
+        if random_state is not None:
+            if isinstance(random_state, bool) or not isinstance(random_state, int):
+                raise TypeError(
+                    f"random_state 必须是 int 或 None，当前为 {type(random_state).__name__}: {random_state!r}")
 
         s = _validate_sensor_xy(sensor_xy, geometry="1d")
         rng = np.random.default_rng(random_state)
@@ -206,6 +235,12 @@ _SUBARRAY_MAP = {
 
 def get_subarray(geometry: str) -> SubarrayBuilder:
     """根据 geometry 返回子阵列构建器实例。"""
+    if not isinstance(geometry, str):
+        raise TypeError(f"geometry 类型应为 str，当前为 {type(geometry).__name__}: {geometry!r}")
+    if not geometry.strip():
+        raise ValueError("geometry 不能为空字符串")
+
+    geometry = geometry.strip().lower()
     if geometry not in SUPPORTED_GEOMETRY:
         raise ValueError(f"geometry={geometry} 不支持，应为 {SUPPORTED_GEOMETRY}")
     return _SUBARRAY_MAP[geometry]()

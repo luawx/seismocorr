@@ -39,6 +39,11 @@ def demean(x: np.ndarray) -> np.ndarray:
     Returns:
         去均值后的数组，形状为 (n_signals, n_samples)
     """
+    x = np.asarray(x)
+    if x.ndim != 2:
+        raise ValueError(f"x 应为二维数组 (n_signals, n_samples)，当前 shape={x.shape}")
+    if x.size == 0:
+        return x.copy()
     return x - np.mean(x, axis=1, keepdims=True)
 
 
@@ -53,6 +58,13 @@ def detrend(x: np.ndarray, type: str = "linear") -> np.ndarray:
     Returns:
         去趋势后的数组，形状为 (n_signals, n_samples)
     """
+    x = np.asarray(x)
+    if x.ndim != 2:
+        raise ValueError(f"x 应为二维数组 (n_signals, n_samples)，当前 shape={x.shape}")
+    if x.size == 0:
+        return x.copy()
+    if type not in ("constant", "linear"):
+        raise ValueError('type 只能是 "constant" 或 "linear"')
     return scipy_detrend(x, type=type, axis=1)
 
 
@@ -67,6 +79,15 @@ def taper(x: np.ndarray, width: float = 0.05) -> np.ndarray:
     Returns:
         加窗后的数组，形状为 (n_signals, n_samples)
     """
+    x = np.asarray(x)
+    if x.ndim != 2:
+        raise ValueError(f"x 应为二维数组 (n_signals, n_samples)，当前 shape={x.shape}")
+    if x.size == 0:
+        return x.copy()
+    width = float(width)
+    if not (0.0 <= width < 0.5):
+        raise ValueError("width 必须在 [0, 0.5) 范围内")
+
     n_samples = x.shape[1]
     window = int(n_samples * width)
     if window == 0:
@@ -113,6 +134,29 @@ def _butter_filter(
     Returns:
         滤波后的时间序列矩阵，形状为 (n_signals, n_samples)
     """
+
+    data = np.asarray(data)
+    if data.ndim != 2:
+        raise ValueError(f"data 应为二维数组 (n_signals, n_samples)，当前 shape={data.shape}")
+    if data.size == 0:
+        return data.copy()
+
+    sampling_rate = float(sampling_rate)
+    if sampling_rate <= 0:
+        raise ValueError("sampling_rate 必须 > 0")
+
+    if freq_min is not None:
+        freq_min = float(freq_min)
+        if freq_min <= 0:
+            raise ValueError("freq_min 必须 > 0")
+    if freq_max is not None:
+        freq_max = float(freq_max)
+        if freq_max <= 0:
+            raise ValueError("freq_max 必须 > 0")
+
+    if (freq_min is not None) and (freq_max is not None) and (freq_min >= freq_max):
+        raise ValueError("freq_min 必须小于 freq_max")
+
     # 早期返回：无滤波要求
     if freq_min is None and freq_max is None:
         return data.copy()
@@ -122,10 +166,10 @@ def _butter_filter(
     critical = []
 
     # 简化滤波器设计逻辑
-    if freq_min and freq_max:
+    if (freq_min is not None) and (freq_max is not None):
         btype = "bandpass"
         Wn = [freq_min / nyquist, freq_max / nyquist]
-    elif freq_min:
+    elif freq_min is not None:
         btype = "highpass"
         Wn = freq_min / nyquist
     else:  # only freq_max

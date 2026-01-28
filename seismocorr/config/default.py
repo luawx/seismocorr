@@ -45,6 +45,19 @@ DEFAULT_DETREND_TYPE = 'linear'  # 或 'demean'
 DEFAULT_FILTER_TYPE = 'bandpass'
 DEFAULT_ZERO_PHASE = True       # 是否零相位滤波（前后两次滤波）
 
+
+# ========================================
+#  部分主函数默认设置
+# ========================================
+# 互相关方法选项
+SUPPORTED_METHODS = ["time-domain", "freq-domain", "deconv", "coherency"]
+
+# 空间相速度反演选项
+SUPPORTED_ASSUMPTION = ["station_avg", "ray_avg"]
+SUPPORTED_GEOMETRY = ["1d", "2d"]
+SUPPORTED_REGULARIZATIONS = ["none", "l2", "l1", "l1_l2"]
+
+
 # ========================================
 # 💡 处理流程控制
 # ========================================

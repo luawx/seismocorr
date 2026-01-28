@@ -73,6 +73,11 @@ class TimeNormalizer2D(ABC):
         pass
 
     def __call__(self, x):
+        x = np.asarray(x)
+        if x.ndim != 2:
+            raise ValueError(f"x 应为二维数组 (n_signals, n_samples)，当前 shape={x.shape}")
+        if x.size == 0:
+            return x.copy()
         return self.apply(x)
 
 
@@ -133,6 +138,9 @@ class ClipNormalizer(TimeNormalizer2D):
     """截幅归一化：限制最大值 - 矩阵版本"""
 
     def __init__(self, clip_val: float = 3.0):
+        clip_val = float(clip_val)
+        if clip_val <= 0:
+            raise ValueError("clip_val 必须 > 0")
         self.clip_val = clip_val
 
     def apply(self, x: np.ndarray) -> np.ndarray:
@@ -157,6 +165,15 @@ class RAMNormalizer(TimeNormalizer2D):
     """RAM 归一化: x / mean(|x|) - 矩阵版本"""
 
     def __init__(self, fmin, Fs, norm_win=0.5):
+        fmin = float(fmin)
+        Fs = float(Fs)
+        norm_win = float(norm_win)
+        if fmin <= 0:
+            raise ValueError("fmin 必须 > 0")
+        if Fs <= 0:
+            raise ValueError("Fs 必须 > 0")
+        if norm_win <= 0:
+            raise ValueError("norm_win 必须 > 0")
         self.fmin = fmin
         self.Fs = Fs
         self.norm_win = norm_win
@@ -204,7 +221,14 @@ def get_time_normalizer_2d(name: str, **kwargs) -> TimeNormalizer2D:
     Returns:
         TimeNormalizer2D 实例
     """
-    cls = _MATRIX_TIME_NORM_MAP.get(name.lower())
+    if not isinstance(name, str):
+        raise TypeError(f"name 类型应为 str，当前为 {type(name).__name__}: {name!r}")
+    if not name.strip():
+        raise ValueError("name 不能为空字符串")
+    name_lower = name.strip().lower()
+
+    cls = _MATRIX_TIME_NORM_MAP.get(name_lower)
+
     if cls is None:
         raise ValueError(
             f"Unknown time normalization method: '{name}'. "
@@ -212,10 +236,10 @@ def get_time_normalizer_2d(name: str, **kwargs) -> TimeNormalizer2D:
         )
 
     # 根据方法名传递特定参数
-    if name.lower() == "clip":
+    if name_lower == "clip":
         clip_val = kwargs.get("clip_val", 3.0)
         return cls(clip_val=clip_val)
-    elif name.lower() == "ramn":
+    elif name_lower == "ramn":
         # RAMNormalizer 需要特定参数
         fmin = kwargs.get("fmin")
         Fs = kwargs.get("Fs")

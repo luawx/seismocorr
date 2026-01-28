@@ -13,6 +13,7 @@ import numpy as np
 from abc import ABC, abstractmethod
 from typing import List, Optional, Sequence, Tuple
 from scipy.sparse import csr_matrix
+from seismocorr.config.default import SUPPORTED_ASSUMPTION, SUPPORTED_GEOMETRY
 
 # 优化库导入
 try:
@@ -34,11 +35,6 @@ except ImportError:
 
 Subarray = List[np.ndarray]
 MatrixLike = csr_matrix
-
-
-SUPPORTED_ASSUMPTION = ["station_avg", "ray_avg"]
-SUPPORTED_GEOMETRY = ["1d", "2d"]
-
 
 class DesignMatrixBuilder(ABC):
     """
@@ -90,6 +86,26 @@ class StationAvgBuilder(DesignMatrixBuilder):
         pair_sampling: Optional[int] = None,
         random_state: Optional[int] = None,
     ) -> MatrixLike:
+        if not isinstance(subarray, (list, tuple)):
+            raise TypeError(f"subarray 类型应为 list/tuple，当前为 {type(subarray).__name__}")
+        if not isinstance(sensor_xy, np.ndarray):
+            raise TypeError(f"sensor_xy 类型应为 np.ndarray，当前为 {type(sensor_xy).__name__}")
+        if not isinstance(geometry, str):
+            raise TypeError(f"geometry 类型应为 str，当前为 {type(geometry).__name__}: {geometry!r}")
+        if pair_sampling is not None:
+            if isinstance(pair_sampling, bool) or not isinstance(pair_sampling, int):
+                raise TypeError(
+                    f"pair_sampling 类型应为 int 或 None，当前为 {type(pair_sampling).__name__}: {pair_sampling!r}"
+                )
+            if pair_sampling < 0:
+                raise ValueError(f"pair_sampling 应 >= 0 或 None，当前为: {pair_sampling!r}")
+
+        if random_state is not None:
+            if isinstance(random_state, bool) or not isinstance(random_state, int):
+                raise TypeError(
+                    f"random_state 类型应为 int 或 None，当前为 {type(random_state).__name__}: {random_state!r}"
+                )
+
         _validate_geometry(geometry)
         n_sensors = _infer_n_sensors(sensor_xy, geometry=geometry)
 
@@ -112,7 +128,13 @@ class StationAvgBuilder(DesignMatrixBuilder):
             data[p : p + m] = w
             p += m
 
-        return csr_matrix((data, (rows, cols)), shape=(n_rows, n_sensors))
+        A = csr_matrix((data, (rows, cols)), shape=(n_rows, n_sensors))
+        if not isinstance(A, csr_matrix):
+            raise RuntimeError(f"返回值必须是 csr_matrix，当前为 {type(A).__name__}")
+        if A.data.size and (not np.all(np.isfinite(A.data))):
+            raise RuntimeError("输出矩阵 A.data 包含 NaN/Inf")
+
+        return A
 
 
 class RayAvgBuilder(DesignMatrixBuilder):
@@ -131,6 +153,26 @@ class RayAvgBuilder(DesignMatrixBuilder):
         pair_sampling: Optional[int] = None,
         random_state: Optional[int] = None,
     ) -> MatrixLike:
+        if not isinstance(subarray, (list, tuple)):
+            raise TypeError(f"subarray 类型应为 list/tuple，当前为 {type(subarray).__name__}")
+        if not isinstance(sensor_xy, np.ndarray):
+            raise TypeError(f"sensor_xy 类型应为 np.ndarray，当前为 {type(sensor_xy).__name__}")
+        if not isinstance(geometry, str):
+            raise TypeError(f"geometry 类型应为 str，当前为 {type(geometry).__name__}: {geometry!r}")
+        if pair_sampling is not None:
+            if isinstance(pair_sampling, bool) or not isinstance(pair_sampling, int):
+                raise TypeError(
+                    f"pair_sampling 类型应为 int 或 None，当前为 {type(pair_sampling).__name__}: {pair_sampling!r}"
+                )
+            if pair_sampling < 0:
+                raise ValueError(f"pair_sampling 应 >= 0 或 None，当前为: {pair_sampling!r}")
+
+        if random_state is not None:
+            if isinstance(random_state, bool) or not isinstance(random_state, int):
+                raise TypeError(
+                    f"random_state 类型应为 int 或 None，当前为 {type(random_state).__name__}: {random_state!r}"
+                )
+
         _validate_geometry(geometry)
 
         if geometry == "1d":
@@ -153,6 +195,28 @@ class RayAvgBuilder(DesignMatrixBuilder):
 
         if grid_x is None or grid_y is None:
             raise ValueError("ray_avg & geometry=2d 必须提供 grid_x/grid_y（网格中心点数组）。")
+        if not isinstance(grid_x, np.ndarray):
+            raise TypeError(f"grid_x 必须是 np.ndarray，当前为 {type(grid_x).__name__}")
+        if not isinstance(grid_y, np.ndarray):
+            raise TypeError(f"grid_y 必须是 np.ndarray，当前为 {type(grid_y).__name__}")
+
+        if grid_x.ndim != 1:
+            raise ValueError(f"grid_x 必须是一维数组（中心点），当前 shape={grid_x.shape}")
+        if grid_y.ndim != 1:
+            raise ValueError(f"grid_y 必须是一维数组（中心点），当前 shape={grid_y.shape}")
+
+        if grid_x.size < 2 or grid_y.size < 2:
+            raise ValueError("grid_x/grid_y 长度必须 >= 2（中心点数组）")
+
+        if not np.issubdtype(grid_x.dtype, np.number):
+            raise TypeError(f"grid_x dtype 必须是数值类型，当前为 {grid_x.dtype}")
+        if not np.issubdtype(grid_y.dtype, np.number):
+            raise TypeError(f"grid_y dtype 必须是数值类型，当前为 {grid_y.dtype}")
+
+        if not np.all(np.isfinite(grid_x)):
+            raise ValueError("grid_x 包含 NaN/Inf")
+        if not np.all(np.isfinite(grid_y)):
+            raise ValueError("grid_y 包含 NaN/Inf")
 
         x_edges = _ensure_edges_1d(np.asarray(grid_x, dtype=np.float64))
         y_edges = _ensure_edges_1d(np.asarray(grid_y, dtype=np.float64))
@@ -173,7 +237,14 @@ class RayAvgBuilder(DesignMatrixBuilder):
             pair_sampling=pair_sampling,
             rng=rng,
         )
-        return csr_matrix((data, (rows, cols)), shape=(len(subs), n_cells))
+
+        A = csr_matrix((data, (rows, cols)), shape=(len(subs), n_cells))
+        if not isinstance(A, csr_matrix):
+            raise RuntimeError(f"返回值必须是 csr_matrix，当前为 {type(A).__name__}")
+        if A.data.size and (not np.all(np.isfinite(A.data))):
+            raise RuntimeError("输出矩阵 A.data 包含 NaN/Inf")
+
+        return A
 
 
 # ====================
@@ -187,6 +258,12 @@ _ASSUMPTION_MAP = {
 
 def get_assumption(assumption: str) -> DesignMatrixBuilder:
     """根据 assumption 名称返回矩阵 A 构建器实例。"""
+
+    if not isinstance(assumption, str):
+        raise TypeError(f"assumption 类型应为 str，当前为 {type(assumption).__name__}: {assumption!r}")
+    if not assumption.strip():
+        raise ValueError("assumption 不能为空字符串")
+
     if assumption not in SUPPORTED_ASSUMPTION:
         raise ValueError(f"assumption={assumption} 不支持，应为 {SUPPORTED_ASSUMPTION}")
     return _ASSUMPTION_MAP[assumption]()
@@ -206,10 +283,24 @@ def _infer_n_sensors(sensor_xy: np.ndarray, *, geometry: str) -> int:
     - 2d: n = sensor_xy.shape[0]
     - 1d: n = sensor_xy.size（支持 (n,) / (n,1)）
     """
-    if geometry == "2d":
-        return int(np.asarray(sensor_xy).shape[0])
     s = np.asarray(sensor_xy)
-    return int(s.size) if s.ndim == 1 else int(s.shape[0])
+
+    if not np.issubdtype(s.dtype, np.number):
+        raise TypeError(f"sensor_xy dtype 应为数值类型，当前为 {s.dtype}")
+    if s.size > 0 and (not np.all(np.isfinite(s))):
+        raise ValueError("sensor_xy 包含 NaN/Inf")
+
+    if geometry == "2d":
+        if s.ndim != 2 or s.shape[1] != 2:
+            raise ValueError(f"geometry='2d' 时 sensor_xy 形状应为 (n,2)，当前为 {s.shape}")
+        return int(s.shape[0])
+
+    if s.ndim == 1:
+        return int(s.size)
+    if s.ndim == 2 and s.shape[1] == 1:
+        return int(s.shape[0])
+
+    raise ValueError(f"geometry='1d' 时 sensor_xy 形状应为 (n,) 或 (n,1)，当前为 {s.shape}")
 
 
 def _normalize_subarray(subarray: Sequence[Sequence[int]], n_sensors: int) -> Subarray:
@@ -222,6 +313,8 @@ def _normalize_subarray(subarray: Sequence[Sequence[int]], n_sensors: int) -> Su
     """
     out: Subarray = []
     for s in subarray:
+        if s is None or isinstance(s, (int, np.integer, str, bytes)):
+            raise TypeError(f"subarray 的每个元素应为索引序列，当前为: {s!r}")
         idx = np.asarray(list(s), dtype=np.int64).reshape(-1)
         if idx.size < 2:
             continue

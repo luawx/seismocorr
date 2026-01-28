@@ -16,13 +16,10 @@ from typing import Any, Dict, Tuple, Union
 from scipy import sparse
 from scipy.optimize import minimize
 from scipy.sparse import csr_matrix
-
+from seismocorr.config.default import SUPPORTED_REGULARIZATIONS
 
 MatrixLike = Union[np.ndarray, csr_matrix]
 InversionResult = Dict[str, Any]
-
-
-SUPPORTED_REGULARIZATIONS = ["none", "l2", "l1", "l1_l2"]
 
 
 class InversionStrategy(ABC):
@@ -150,6 +147,12 @@ _INVERSION_MAP = {
 
 def get_inversion(regularization: str) -> InversionStrategy:
     """根据正则类型返回反演策略实例。"""
+    if not isinstance(regularization, str):
+        raise TypeError(f"regularization 类型应为 str，当前为 {type(regularization).__name__}: {regularization!r}")
+    regularization = regularization.strip().lower()
+    if not regularization:
+        raise ValueError("regularization 不能为空字符串")
+
     if regularization not in SUPPORTED_REGULARIZATIONS:
         raise ValueError(f"regularization={regularization} 不支持，应为 {SUPPORTED_REGULARIZATIONS}")
     return _INVERSION_MAP[regularization]()

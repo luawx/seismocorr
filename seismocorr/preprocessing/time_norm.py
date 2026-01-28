@@ -21,6 +21,11 @@ class TimeNormalizer(ABC):
         pass
 
     def __call__(self, x):
+        x = np.asarray(x)
+        if x.ndim != 1:
+            raise ValueError(f"x 应为一维数组，当前 shape={x.shape}")
+        if x.size == 0:
+            return x.copy()
         return self.apply(x)
 
 
@@ -52,6 +57,9 @@ class RMSNormalizer(TimeNormalizer):
 class ClipNormalizer(TimeNormalizer):
     """截幅归一化：限制最大值"""
     def __init__(self, clip_val: float = 3.0):
+        clip_val = float(clip_val)
+        if clip_val <= 0:
+            raise ValueError("clip_val 必须 > 0")
         self.clip_val = clip_val
 
     def apply(self, x: np.ndarray) -> np.ndarray:
@@ -67,6 +75,15 @@ class NoTimeNorm(TimeNormalizer):
 class RAMNormalizer(TimeNormalizer):
     """RAM 归一化: x / mean(|x|)"""
     def __init__(self,fmin,Fs,norm_win=0.5):
+        fmin = float(fmin)
+        Fs = float(Fs)
+        norm_win = float(norm_win)
+        if fmin <= 0:
+            raise ValueError("fmin 必须 > 0")
+        if Fs <= 0:
+            raise ValueError("Fs 必须 > 0")
+        if norm_win <= 0:
+            raise ValueError("norm_win 必须 > 0")
         self.fmin = fmin
         self.Fs = Fs
         self.norm_win = norm_win
@@ -143,6 +160,19 @@ class WaterLevelNormalizer(TimeNormalizer):
         self.n_iter = int(n_iter)
         self.eps = float(eps)
         self.dynamic_factor_decay = dynamic_factor_decay
+
+        if self.Fs <= 0:
+            raise ValueError("Fs 必须 > 0")
+        if self.win_length <= 0:
+            raise ValueError("win_length 必须 > 0")
+        if self.n_iter < 1:
+            raise ValueError("n_iter 必须 >= 1")
+        if self.eps <= 0:
+            raise ValueError("eps 必须 > 0")
+        if self.dynamic_factor_decay is not None:
+            self.dynamic_factor_decay = float(self.dynamic_factor_decay)
+            if not (0.0 < self.dynamic_factor_decay <= 1.0):
+                raise ValueError("dynamic_factor_decay 必须在 (0, 1] 内")
 
     def apply(self, x: np.ndarray) -> np.ndarray:
         y = np.asarray(x, dtype=float).copy()
@@ -267,6 +297,15 @@ class CWTSoftThreshold1D(TimeNormalizer):
         self._dt = 1.0 / self.fs
         self._scales = self._build_scales()
 
+        if self.fs <= 0:
+            raise ValueError("fs 必须 > 0")
+        if self.voices_per_octave < 1:
+            raise ValueError("voices_per_octave 必须 >= 1")
+        if not (0.0 < self.quantile < 1.0):
+            raise ValueError("quantile 必须在 (0, 1) 内")
+        if not isinstance(self.wavelet, str) or not self.wavelet.strip():
+            raise TypeError("wavelet 必须是非空字符串")
+
 
     def _build_scales(self) -> np.ndarray:
         if self.f_min <= 0 or self.f_max <= 0 or self.f_max <= self.f_min:
@@ -286,6 +325,23 @@ class CWTSoftThreshold1D(TimeNormalizer):
         # CWT
         W, _ = pywt.cwt(x, self._scales, self.wavelet, sampling_period=self._dt)
         mag = np.abs(W)
+
+        idx = self.noise_idx
+        if isinstance(idx, slice):
+            start = 0 if idx.start is None else idx.start
+            stop = n if idx.stop is None else idx.stop
+            if stop <= start:
+                raise ValueError("noise_idx slice 为空或无效")
+        else:
+            idx = np.asarray(idx)
+            if idx.size == 0:
+                raise ValueError("noise_idx 不能为空")
+            if idx.dtype == bool:
+                if idx.shape[0] != n:
+                    raise ValueError("noise_idx 为 bool mask 时长度必须等于信号长度")
+            else:
+                if np.any((idx < 0) | (idx >= n)):
+                    raise ValueError("noise_idx 存在越界索引")
 
         # beta: 一次性 quantile（向量化提速）
         beta = np.quantile(mag[:, self.noise_idx], self.quantile, axis=1)  # (n_scales,)
@@ -339,17 +395,22 @@ def get_time_normalizer(name: str, **kwargs) -> TimeNormalizer:
     Returns:
         TimeNormalizer 实例
     """
-    name_lower = name.lower()
+    if not isinstance(name, str):
+        raise TypeError(f"name 类型应为 str，当前为 {type(name).__name__}: {name!r}")
+    if not name.strip():
+        raise ValueError("name 不能为空字符串")
+    name_lower = name.strip().lower()
+
     cls = _TIME_NORM_MAP.get(name_lower)
     if cls is None:
         available_methods = list(_TIME_NORM_MAP.keys())
         raise ValueError(f"未知的时域归一化方法: '{name}'. 请从以下方法中选择: {', '.join(available_methods)}")
     
     # 根据方法名传递特定参数
-    if name.lower() == 'clip':
+    if name_lower == 'clip':
         clip_val = kwargs.get('clip_val', 3.0)
         return cls(clip_val=clip_val)
-    elif name.lower() == 'ramn':
+    elif name_lower == 'ramn':
         # RAMNormalizer 需要特定参数
         fmin = kwargs.get('fmin')
         Fs = kwargs.get('Fs')
@@ -360,7 +421,7 @@ def get_time_normalizer(name: str, **kwargs) -> TimeNormalizer:
             
         return cls(fmin=fmin, Fs=Fs, norm_win=norm_win)
 
-    elif name.lower() == 'waterlevel':
+    elif name_lower == 'waterlevel':
         # Water-level normalization（按窗口 RMS 做能量压制）
         Fs = kwargs.get('Fs')
         if Fs is None:
@@ -379,7 +440,7 @@ def get_time_normalizer(name: str, **kwargs) -> TimeNormalizer:
             eps=eps,
         )
 
-    elif name.lower() == 'cwt-soft':
+    elif name_lower == 'cwt-soft':
         # 基于 CWT 的软阈值处理（designal / denoise）
         Fs = kwargs.get('Fs')
         noise_idx = kwargs.get('noise_idx')

@@ -36,17 +36,26 @@ class FreqNormalizer2D(ABC):
         pass
 
     def __call__(self, data):
+        data = np.asarray(data)
+        if data.ndim != 2:
+            raise ValueError(f"data 必须是二维矩阵 (n_signals, n_samples)，当前 shape={data.shape}")
         return self.apply(data)
 
     def _check_empty_input(self, data: np.ndarray) -> bool:
         """检查输入是否为空数组"""
-        return data.shape[0] == 0 or data.shape[1] == 0
+        data = np.asarray(data)
+        return data.size == 0
 
 
 class SpectralWhitening2D(FreqNormalizer2D):
     """谱白化（Spectral Whitening）"""
 
     def __init__(self, smooth_win: int = 20):
+        if isinstance(smooth_win, bool) or not isinstance(smooth_win, int):
+            raise TypeError(f"smooth_win 类型应为 int，当前为 {type(smooth_win).__name__}: {smooth_win!r}")
+        if smooth_win < 1:
+            raise ValueError(f"smooth_win 应 >= 1，当前为 {smooth_win!r}")
+
         self.smooth_win = smooth_win
         self.epsilon = 1e-10  # 用于数值稳定性的小常数
 
@@ -101,6 +110,15 @@ class BandWhitening2D(FreqNormalizer2D):
     """频带白化（Band Whitening）"""
 
     def __init__(self, freq_min: float, freq_max: float, Fs: float):
+        for name, v in [("freq_min", freq_min), ("freq_max", freq_max), ("Fs", Fs)]:
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise TypeError(f"{name} 应为数值类型，当前为 {type(v).__name__}: {v!r}")
+            if not np.isfinite(v):
+                raise ValueError(f"{name} 不能是 NaN/Inf，当前为 {v!r}")
+        Fs = float(Fs)
+        if Fs <= 0:
+            raise ValueError(f"Fs 必须 > 0，当前为 {Fs!r}")
+
         self.fmin = freq_min
         self.fmax = freq_max
         self.Fs = Fs
@@ -121,6 +139,8 @@ class BandWhitening2D(FreqNormalizer2D):
             return data.copy()
 
         n_signals, n_samples = data.shape
+        if n_samples < 2:
+            return data.copy()
 
         # 计算频率范围
         frange = float(self.fmax) - float(self.fmin)
@@ -180,6 +200,12 @@ class RmaFreqNorm2D(FreqNormalizer2D):
     """递归移动平均白化 (Recursive Moving Average Whitening) - 矩阵版本"""
 
     def __init__(self, alpha: float = 0.9):
+        if isinstance(alpha, bool) or not isinstance(alpha, (int, float)):
+            raise TypeError(f"alpha 应为数值类型，当前为 {type(alpha).__name__}: {alpha!r}")
+        alpha = float(alpha)
+        if not (0.0 < alpha < 1.0):
+            raise ValueError(f"alpha 建议在 (0,1) 内，当前为 {alpha!r}")
+
         self.alpha = alpha  # 平滑系数
         self.avg_power = None
 
@@ -252,7 +278,13 @@ def get_freq_normalizer_2d(name: str, **kwargs) -> FreqNormalizer2D:
     Returns:
         FreqNormalizer2D 实例
     """
-    cls = _MATRIX_FREQ_NORM_MAP.get(name.lower())
+    if not isinstance(name, str):
+        raise TypeError(f"name 类型应为 str，当前为 {type(name).__name__}: {name!r}")
+    if not name.strip():
+        raise ValueError("name 不能为空字符串")
+    name_lower = name.strip().lower()
+
+    cls = _MATRIX_FREQ_NORM_MAP.get(name_lower)
     if cls is None:
         raise ValueError(
             f"Unknown frequency normalization method: '{name}'. "
@@ -260,13 +292,13 @@ def get_freq_normalizer_2d(name: str, **kwargs) -> FreqNormalizer2D:
         )
 
     # 根据方法名传递特定参数
-    if name.lower() == "whiten":
+    if name_lower == "whiten":
         smooth_win = kwargs.get("smooth_win", 20)
         return cls(smooth_win=smooth_win)
-    elif name.lower() == "rma":
+    elif name_lower == "rma":
         alpha = kwargs.get("alpha", 0.9)
         return cls(alpha=alpha)
-    elif name.lower() == "bandwhiten":
+    elif name_lower == "bandwhiten":
         # BandWhitening 需要特定参数
         freq_min = kwargs.get("freq_min")
         freq_max = kwargs.get("freq_max")

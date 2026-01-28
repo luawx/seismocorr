@@ -17,6 +17,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Tuple, Union
 from scipy.fftpack import fft, ifft, next_fast_len
 import numpy as np
+from seismocorr.config.default import SUPPORTED_METHODS
 
 # 优化库导入
 try:
@@ -35,7 +36,7 @@ except ImportError:
         """Numba不可用时的回退prange"""
         return range(n)
 
-SUPPORTED_METHODS = ["time-domain", "freq-domain", "deconv", "coherency"]
+
 # -----------------------------# 类型定义# -----------------------------#
 ArrayLike = Union[np.ndarray, List[float]]
 LagsAndCCF = Tuple[np.ndarray, np.ndarray]
@@ -66,11 +67,33 @@ class CorrelationConfig:
         
         # 验证配置
         self._validate()
-    
+
+
     def _validate(self):
         """验证配置参数的有效性"""
+
         if self.method not in SUPPORTED_METHODS:
-            raise ValueError(f"不支持的计算方法: {self.method}。请从 {SUPPORTED_METHODS} 中选择")
+            raise ValueError(
+                f"不支持的计算方法: {self.method!r}。请从 {SUPPORTED_METHODS} 中选择"
+            )
+
+        if self.max_lag is not None:
+            if isinstance(self.max_lag, bool) or not isinstance(self.max_lag, (int, float)):
+                raise TypeError(
+                    f"max_lag 类型应为 float/int 或 None，当前为 {type(self.max_lag).__name__}: {self.max_lag!r}"
+                )
+            if not np.isfinite(float(self.max_lag)):
+                raise ValueError(f"max_lag 应为有限数值，当前为: {self.max_lag!r}")
+            if float(self.max_lag) < 0:
+                raise ValueError(f"max_lag 应该 >= 0，当前为: {self.max_lag!r}")
+
+        if self.nfft is not None:
+            if isinstance(self.nfft, bool) or not isinstance(self.nfft, int):
+                raise TypeError(
+                    f"nfft 类型应为 int 或 None，当前为 {type(self.nfft).__name__}: {self.nfft!r}"
+                )
+            if self.nfft <= 0:
+                raise ValueError(f"nfft 应为正整数，当前为: {self.nfft!r}")
     
     def to_dict(self) -> Dict[str, Any]:
         """将配置转换为字典"""
@@ -213,7 +236,7 @@ class CorrelationEngine:
         x: np.ndarray,
         y: np.ndarray,
         sr: float,
-        max_lag: int,
+        max_lag: float,
         nfft: Optional[int]
     ) -> LagsAndCCF:
         """
@@ -246,21 +269,40 @@ class CorrelationEngine:
             lags: 时间滞后数组 (单位：秒)
             ccf: 互相关函数值
         """
+
+        if config is not None and not isinstance(config, CorrelationConfig):
+            raise TypeError(f"config 类型应为 CorrelationConfig 或 None，当前为 {type(config).__name__}")
         # 使用提供的配置或实例配置
         current_config = config or self.config
         config_dict = current_config.to_dict()
+
+        if isinstance(sampling_rate, bool) or not isinstance(sampling_rate, (int, float)):
+            raise TypeError(f"sampling_rate 类型有误，当前为 {type(sampling_rate).__name__}: {sampling_rate!r}")
+        if not np.isfinite(float(sampling_rate)) or float(sampling_rate) <= 0:
+            raise ValueError(f"sampling_rate 必须为有限且 > 0 的数(Hz)，当前为: {sampling_rate!r}")
+        sampling_rate = float(sampling_rate)
         
         # 转换为浮点数组
         x = self._as_float_array(x)
         y = self._as_float_array(y)
 
         if len(x) == 0 or len(y) == 0:
-            return np.array([]), np.array([])
+            return np.array([], dtype=np.float64), np.array([], dtype=np.float64)
+
+        if not np.all(np.isfinite(x)):
+            raise ValueError("输入 x 包含 NaN/Inf")
+        if not np.all(np.isfinite(y)):
+            raise ValueError("输入 y 包含 NaN/Inf")
 
         # 确定最大滞后
         max_lag = config_dict["max_lag"]
-        if not max_lag:
+        if max_lag is None:
             max_lag = min(len(x), len(y)) / sampling_rate
+        else:
+            max_lag = float(max_lag)
+
+        if not np.isfinite(max_lag) or max_lag < 0:
+            raise ValueError(f"max_lag 必须为有限且 >= 0 的秒数，当前为: {max_lag!r}")
 
         # 截断到相同长度（避免后续处理中的不匹配）
         min_len = min(len(x), len(y))
@@ -283,6 +325,14 @@ class CorrelationEngine:
             raise ValueError(
                 f"Unsupported method: {method}. Choose from {SUPPORTED_METHODS}"
             )
+
+        if len(lags) != len(ccf):
+            raise RuntimeError(
+                f"输出不一致：len(lags)={len(lags)} != len(ccf)={len(ccf)}。"
+                f"method={method!r}, sampling_rate={sampling_rate!r}, max_lag={max_lag!r}"
+            )
+        lags = np.asarray(lags, dtype=np.float64)
+        ccf = np.asarray(ccf, dtype=np.float64)
 
         return lags, ccf
 
@@ -318,16 +368,41 @@ class BatchCorrelator:
         valid_pairs = []
         valid_traces_a = []
         valid_traces_b = []
-        
+
+        if config is not None and not isinstance(config, CorrelationConfig):
+            raise TypeError(f"config 类型应为 CorrelationConfig 或 None，当前为 {type(config).__name__}")
+        if not isinstance(traces, dict):
+            raise TypeError(f"traces 类型应为 Dict[str, np.ndarray]，当前为 {type(traces).__name__}")
+        if not isinstance(pairs, list):
+            raise TypeError(f"pairs 类型应为 List[Tuple[str,str]]，当前为 {type(pairs).__name__}")
+
+        if isinstance(sampling_rate, bool) or not isinstance(sampling_rate, (int, float)):
+            raise TypeError(f"sampling_rate 类型有误，当前为 {type(sampling_rate).__name__}: {sampling_rate!r}")
+        if not np.isfinite(float(sampling_rate)) or float(sampling_rate) <= 0:
+            raise ValueError(f"sampling_rate 必须为有限且 > 0 的数，当前为: {sampling_rate!r}")
+        sampling_rate = float(sampling_rate)
+
+        for item in pairs:
+            if not (isinstance(item, (tuple, list)) and len(item) == 2):
+                raise TypeError(f"pairs 元素必须是长度为2的 tuple/list，当前为: {item!r}")
+            if not (isinstance(item[0], str) and isinstance(item[1], str)):
+                raise TypeError(
+                    f"pairs 中通道名类型应为 str，当前为: ({type(item[0]).__name__}, {type(item[1]).__name__})")
+
         # 首先筛选有效的通道对
         for a, b in pairs:
             if a in traces and b in traces:
                 valid_pairs.append((a, b))
                 valid_traces_a.append(traces[a])
                 valid_traces_b.append(traces[b])
-        
+
         if not valid_pairs:
-            return np.array([]), np.array([]), []
+            return (
+                np.array([], dtype=np.float64),
+                np.zeros((0, 0), dtype=np.float64),
+                []
+            )
+
         
         # 计算第一个通道对，获取lags
         a0, b0 = valid_pairs[0]
@@ -348,8 +423,15 @@ class BatchCorrelator:
             _, ccf = self.engine.compute_cross_correlation(
                 valid_traces_a[i], valid_traces_b[i], sampling_rate, config
             )
+            if len(ccf) != n_lags:
+                raise RuntimeError(
+                    f"通道对 {a}--{b} 的 ccf 长度 {len(ccf)} 与 lags 长度 {n_lags} 不一致，无法组成统一 batch 输出"
+                )
             ccfs[i] = ccf
             keys.append(f"{a}--{b}")
+
+        lags = np.asarray(lags, dtype=np.float64)
+        ccfs = np.asarray(ccfs, dtype=np.float64)
 
         return lags, ccfs, keys
     
@@ -393,9 +475,35 @@ class BatchCorrelator:
             ccfs: 二维数组，每行对应一个通道对的互相关函数值
             keys: 通道对名称列表，对应ccfs的每一行
         """
+
+        if config is not None and not isinstance(config, CorrelationConfig):
+            raise TypeError(f"config 类型应为 CorrelationConfig 或 None，当前为 {type(config).__name__}")
         # 使用提供的配置或实例配置
         current_config = config or self.engine.config
         config_dict = current_config.to_dict()
+
+        if parallel_backend not in ("auto", "process", "thread"):
+            raise ValueError(f"parallel_backend 类型应为 'auto'/'process'/'thread'，当前为: {parallel_backend!r}")
+
+        if isinstance(n_jobs, bool) or not isinstance(n_jobs, int):
+            raise TypeError(f"n_jobs 类型应为 int，当前为 {type(n_jobs).__name__}: {n_jobs!r}")
+        if not isinstance(traces, dict):
+            raise TypeError(f"traces 类型应为 Dict[str, np.ndarray]，当前为 {type(traces).__name__}")
+        if not isinstance(pairs, list):
+            raise TypeError(f"pairs 类型应为 List[Tuple[str,str]]，当前为 {type(pairs).__name__}")
+
+        if isinstance(sampling_rate, bool) or not isinstance(sampling_rate, (int, float)):
+            raise TypeError(f"sampling_rate 类型有误，当前为 {type(sampling_rate).__name__}: {sampling_rate!r}")
+        if not np.isfinite(float(sampling_rate)) or float(sampling_rate) <= 0:
+            raise ValueError(f"sampling_rate 必须为有限且 > 0 的数，当前为: {sampling_rate!r}")
+        sampling_rate = float(sampling_rate)
+
+        for item in pairs:
+            if not (isinstance(item, (tuple, list)) and len(item) == 2):
+                raise TypeError(f"pairs 元素必须是长度为2的 tuple/list，当前为: {item!r}")
+            if not (isinstance(item[0], str) and isinstance(item[1], str)):
+                raise TypeError(
+                    f"pairs 中通道名类型应为 str，当前为: ({type(item[0]).__name__}, {type(item[1]).__name__})")
         
         # 优化1：小批量直接顺序执行，避免并行开销
         if n_jobs == 0 or n_jobs == 1 or len(pairs) <= 4:
@@ -419,7 +527,11 @@ class BatchCorrelator:
             valid_pairs.append((a, b))
 
         if not valid_tasks:
-            return np.array([]), np.array([]), []
+            return (
+                np.array([], dtype=np.float64),
+                np.zeros((0, 0), dtype=np.float64),
+                []
+            )
         
         # 计算第一个通道对，获取lags
         a0, b0, trace_a0, trace_b0, _, _ = valid_tasks[0]
@@ -485,6 +597,14 @@ class BatchCorrelator:
         for i, (key, ccf) in enumerate(pair_results):
             if key is not None and ccf is not None:
                 keys.append(key)
+
+                if len(ccf) != n_lags:
+                    raise RuntimeError(
+                        f"{key} 的 ccf 长度 {len(ccf)} 与 lags 长度 {n_lags} 不一致，无法组成统一 batch 输出"
+                    )
                 ccfs[i] = ccf
+
+        lags = np.asarray(lags, dtype=np.float64)
+        ccfs = np.asarray(ccfs, dtype=np.float64)
 
         return lags, ccfs, keys

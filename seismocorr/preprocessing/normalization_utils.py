@@ -6,9 +6,7 @@ from numba import njit
 from seismocorr.preprocessing.freq_norm import get_freq_normalizer
 from seismocorr.preprocessing.normal_func import bandpass
 from seismocorr.preprocessing.time_norm import get_time_normalizer
-# -----------------------------# 核心算法枚举# -----------------------------
-SUPPORTED_METHODS = ["time-domain", "freq-domain", "deconv", "coherency"]
-NORMALIZATION_OPTIONS = ["zscore", "one-bit", "rms", "no"]
+from seismocorr.config.default import SUPPORTED_METHODS, NORMALIZATION_OPTIONS
 
 
 # -----------------------------# 辅助函数# -----------------------------
@@ -36,6 +34,13 @@ def get_normalization_method_details(method_type: str, method_name: str) -> Dict
     Returns:
         Dict[str, Any]: 包含方法描述和参数信息的字典
     """
+    if not isinstance(method_type, str) or not method_type.strip():
+        raise TypeError("method_type 必须是非空字符串")
+    if not isinstance(method_name, str) or not method_name.strip():
+        raise TypeError("method_name 必须是非空字符串")
+
+    method_type = method_type.strip().lower()
+    method_name = method_name.strip().lower()
     # 时域归一化方法详情
     time_method_details = {
         'zscore': {
@@ -199,6 +204,30 @@ class SignalPreprocessor:
         Returns:
             预处理后的信号
         """
+        data = np.asarray(data, dtype=np.float64)
+        if data.ndim != 1:
+            raise ValueError(f"data 应为一维数组，当前 shape={data.shape}")
+
+        sampling_rate = float(sampling_rate)
+        if sampling_rate <= 0:
+            raise ValueError("sampling_rate 应 > 0")
+
+        if data.size == 0:
+            return data.copy()
+
+        if not np.all(np.isfinite(data)):
+            raise ValueError("data 包含 NaN/Inf")
+
+        if freq_band is not None:
+            if (not isinstance(freq_band, (tuple, list))) or len(freq_band) != 2:
+                raise TypeError("freq_band 必须是 (fmin, fmax) 二元组或长度为2的list")
+            fmin, fmax = float(freq_band[0]), float(freq_band[1])
+            if fmin <= 0 or fmax <= 0 or fmin >= fmax:
+                raise ValueError("freq_band 需要满足 0 < fmin < fmax")
+            if fmax >= 0.5 * sampling_rate:
+                raise ValueError("freq_band 的 fmax 不能 >= Nyquist (0.5*sampling_rate)")
+
+
         # 跳过非常短的信号的预处理，避免除以零错误
         if len(data) > 2:
             window = max(1, int(len(data) * 0.05))
@@ -233,17 +262,42 @@ class SignalPreprocessor:
         Returns:
             归一化后的信号
         """
+        data = np.asarray(data, dtype=np.float64)
+        if data.ndim != 1:
+            raise ValueError(f"data 应为一维数组，当前 shape={data.shape}")
+        if data.size == 0:
+            return data.copy()
+        if not np.all(np.isfinite(data)):
+            raise ValueError("data 包含 NaN/Inf")
+
+        sampling_rate = float(sampling_rate)
+        if sampling_rate <= 0:
+            raise ValueError("sampling_rate 必须 > 0")
+
+        if not isinstance(time_normalize, str) or not time_normalize.strip():
+            raise TypeError("time_normalize 必须是非空字符串")
+        if not isinstance(freq_normalize, str) or not freq_normalize.strip():
+            raise TypeError("freq_normalize 必须是非空字符串")
+
+        time_normalize = time_normalize.strip().lower()
+        freq_normalize = freq_normalize.strip().lower()
+
+        if time_norm_kwargs is not None and not isinstance(time_norm_kwargs, dict):
+            raise TypeError("time_norm_kwargs 必须是 dict 或 None")
+        if freq_norm_kwargs is not None and not isinstance(freq_norm_kwargs, dict):
+            raise TypeError("freq_norm_kwargs 必须是 dict 或 None")
+
         time_norm_kwargs = time_norm_kwargs or {}
         freq_norm_kwargs = freq_norm_kwargs or {}
         
         # 时域归一化
         time_norm_kwargs_with_fs = {**time_norm_kwargs, "Fs": sampling_rate, "npts": len(data)}
         normalizer = get_time_normalizer(time_normalize, **time_norm_kwargs_with_fs)
-        data = normalizer.apply(data)
+        data = normalizer(data)
         
         # 频域归一化
         freq_norm_kwargs_with_fs = {**freq_norm_kwargs, "Fs": sampling_rate}
         normalizer = get_freq_normalizer(freq_normalize, **freq_norm_kwargs_with_fs)
-        data = normalizer.apply(data)
+        data = normalizer(data)
         
         return data

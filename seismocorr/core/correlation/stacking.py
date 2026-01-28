@@ -36,7 +36,43 @@ class StackingStrategy(ABC):
         pass
 
     def __call__(self, ccf_list: List[np.ndarray]) -> np.ndarray:
-        return self.stack(ccf_list)
+        if not isinstance(ccf_list, (list, tuple)):
+            raise TypeError(f"ccf_list 必须是 list/tuple，当前为 {type(ccf_list).__name__}")
+
+        if len(ccf_list) == 0:
+            raise ValueError("ccf_list 不能为空")
+
+        checked = []
+        n_lags = None
+        for i, c in enumerate(ccf_list):
+            a = np.asarray(c)
+
+            if a.ndim != 1:
+                raise ValueError(f"ccf_list[{i}] 类型应为一维数组，当前 shape={a.shape}")
+            if a.size == 0:
+                raise ValueError(f"ccf_list[{i}] 不能为空数组")
+            if not np.issubdtype(a.dtype, np.number):
+                raise TypeError(f"ccf_list[{i}] dtype 类型应为数值类型，当前为 {a.dtype}")
+            if not np.all(np.isfinite(a)):
+                raise ValueError(f"ccf_list[{i}] 包含 NaN/Inf")
+            if n_lags is None:
+                n_lags = a.shape[0]
+            elif a.shape[0] != n_lags:
+                raise ValueError(
+                    f"ccf_list 中各 CCF 长度需一致：期望 {n_lags}，但 ccf_list[{i}] 长度为 {a.shape[0]}"
+                )
+            checked.append(a.astype(np.float64, copy=False))
+
+        out = self.stack(checked)
+        out = np.asarray(out, dtype=np.float64)
+        if out.ndim != 1:
+            raise RuntimeError(f"stack 输出形状应为一维数组，当前 shape={out.shape}")
+        if out.shape[0] != n_lags:
+            raise RuntimeError(f"stack 输出长度应为 {n_lags}，当前为 {out.shape[0]}")
+        if not np.all(np.isfinite(out)):
+            raise RuntimeError("stack 输出包含 NaN/Inf")
+
+        return out
 
 
 class LinearStack(StackingStrategy):
@@ -159,6 +195,10 @@ def get_stacker(name: str, **kwargs) -> StackingStrategy:
     Raises:
         ValueError: 如果方法名不支持
     """
+    if not isinstance(name, str):
+        raise TypeError(f"name 类型应为 str，当前为 {type(name).__name__}: {name!r}")
+    if not name.strip():
+        raise ValueError("name 不能为空字符串")
     cls = _STRATEGY_REGISTRY.get(name.lower())
     if cls is None:
         raise ValueError(f"Unknown stacking method: {name}. "
@@ -194,5 +234,10 @@ def stack_ccfs(ccf_list: List[np.ndarray], method: str = 'linear', **kwargs) -> 
     Returns:
         叠加后的 CCF
     """
+    if not isinstance(method, str):
+        raise TypeError(f"method 类型应为 str，当前为 {type(method).__name__}: {method!r}")
+    if not method.strip():
+        raise ValueError("method 不能为空字符串")
+
     stacker = get_stacker(method, **kwargs)
     return stacker(ccf_list)
