@@ -22,27 +22,11 @@ def _build_disper_energy(
     """
     Disper energy 插件：生成 PlotSpec（后端无关）
 
-data 约定（dict）：
+    data 约定（dict）：
       required:
         - "E": 2D array, shape (n_v, n_f) 频散能量/幅值图（v 作为行，f 作为列）
         - "f": 1D array, shape (n_f,) 频率轴
         - "v": 1D array, shape (n_v,) 速度轴（相速度/群速度都可）
-      optional:
-        - "picks": 叠加曲线（等同于参数 picks，二选一）
-        - "meta": 任意元信息
-
-    picks（参数或 data["picks"]）格式：
-      - dict: {"f": (n,), "v": (n,), "label": str?, "mode": any?}
-      - list[dict]: 多条曲线
-      也支持每条曲线额外字段：
-        - "color": str
-        - "linewidth": float
-        - "alpha": float
-        - "style": "line"|"scatter"|"both"
-
-    Notes:
-      - 本插件只负责产出 PlotSpec/Layer，不绑定 matplotlib。
-      - 若后端支持 heatmap/image：建议 Layer.type 使用 "heatmap"。
     """
     if not isinstance(data, dict):
         raise TypeError("dispersion.energy 当前仅支持 dict 输入：{'E','f','v','picks?'}")
@@ -63,16 +47,15 @@ data 约定（dict）：
     E_disp = E.copy()
     
     if normalize:
-        pass
+        E_disp = 2 * (E - np.min(E)) / (np.max(E) - np.min(E)) - 1
 
-    #能量图图层
     heat = Layer(
         type="heatmap",
 
         data={
             "x": f,
             "y": v,
-            "z": E,
+            "z": E_disp,
         },
 
         style={
@@ -84,8 +67,9 @@ data 约定（dict）：
     )
 
     layers: list[Layer] = [heat]
+    
     layout = {
-        "title": title or "Dispersion Energy Map",
+        "title": title,
         "x_label": x_label,
         "y_label": y_label,
         "x_lim": x_lim,
@@ -93,18 +77,20 @@ data 约定（dict）：
     }
 
     if x_lim is not None:
-        layout["x_lim"] = [float(x_lim[0]), float(x_lim[1])]
+        layout["x_lim"]= [float(x_lim[0]), float(x_lim[1])]
+    else:
+        layout["x_lim"] = [float(np.min(f)), float(np.max(f))]
     if y_lim is not None:
         layout["y_lim"] = [float(y_lim[0]), float(y_lim[1])]
-
-    
+    else:
+        layout["y_lim"] = [float(np.min(v)), float(np.max(v))]
 
     return PlotSpec(plot_id="disper_energy", layers=layers, layout=layout)
 
 
 PLUGINS = [
     Plugin(
-        id="disper_energy",
+        id="heat_map",
         title="频散能量图（f-v）",
         build=_build_disper_energy,
         default_layout={"figsize": (10, 6)},
@@ -119,13 +105,13 @@ PLUGINS = [
         },
 
         params={
-            "title": Param("str", None, "图标题"),
+            "title": Param("str", "Dispersion Energy Map", "图标题"),
             "x_label": Param("str", "Frequency (Hz)", "x轴标签"),
             "y_label": Param("str", "Velocity (m/s)", "y轴标签"),
             "x_lim": Param("list[float]", None, "x轴范围：[xmin, xmax]"),
             "y_lim": Param("list[float]", None, "y轴范围：[ymin, ymax]"),
-            "cmap": Param("str", None, "热力图风格"),
-            "colorbar_label": Param("str", None, "colorbar_label"),
+            "cmap": Param("str", "jet", "热力图风格"),
+            "colorbar_label": Param("str", "Energy", "colorbar_label"),
 
         },
     )

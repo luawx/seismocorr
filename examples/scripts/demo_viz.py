@@ -6,7 +6,9 @@ import numpy as np
 
 from seismocorr.visualization import help_plot, plot, set_default_backend, show
 
-
+# =========================
+# 数据生成
+# =========================
 def generate_ccf_data(n_tr: int = 40, n_lags: int = 401, *, seed: int = 0) -> Dict[str, Any]:
     """生成模拟 CCF 数据。
 
@@ -106,6 +108,46 @@ def generate_dispersion_energy_data(
     return {"E": E, "f": f, "v": v}
 
 
+def generate_seismic_data(
+    n_tr: int = 3,  # 道数（traces）
+    n_samples: int = 1000,  # 每道采样点数
+    duration: float = 20.0,  # 持续时间（秒）s
+    *, 
+    seed: int = 42
+) -> Dict[str, Any]:
+    """生成模拟地震波形数据。
+
+    Args:
+        n_tr: 道数（traces 数量）。
+        n_samples: 每道的采样点数。
+        duration: 每个波形的持续时间。
+        seed: 随机种子，用于可复现。
+
+    Returns:
+        dict，包含：
+            - traces: (n_tr, n_samples) 的地震波形矩阵
+            - time: (n_samples,) 时间轴
+            - labels: (n_tr,) 的标签列表
+    """
+    rng = np.random.default_rng(seed)
+
+    time = np.linspace(0, duration, n_samples)  # 时间轴
+    traces = np.zeros((n_tr, n_samples))  # 初始化地震波形矩阵
+
+    for i in range(n_tr):
+        # 使用正弦波模拟地震波形
+        frequency = rng.uniform(0.1, 1.0)  # 随机频率
+        traces[i, :] = np.sin(2 * np.pi * frequency * time) + 0.1 * rng.standard_normal(n_samples)
+
+    # 标签为道的编号
+    labels = [f"STA{i:02d}" for i in range(n_tr)]
+
+    return {"traces": traces, "time": time, "labels": labels}
+
+
+# =========================
+# 绘图测试
+# =========================
 def test_ccf_wiggle_plot() -> None:
     """测试并绘制 CCF wiggle 图。"""
     set_default_backend("mpl")
@@ -154,14 +196,14 @@ def test_dispersion_energy_plot() -> None:
 
     # 绘制频散能量图
     fig = plot(
-        "disper_energy",
+        "heat_map",
         data={"E": dispersion_data["E"], "f": dispersion_data["f"], "v": dispersion_data["v"]},
         title="Dispersion Energy Map",
         x_label="Frequency (Hz)",
         y_label="Velocity (m/s)",
         x_lim=[8, 10], 
         y_lim=[3000, 5000],
-        cmap = "coolwarm",
+        cmap = "jet",
         colorbar_label = "Energy",
 
     )
@@ -170,14 +212,42 @@ def test_dispersion_energy_plot() -> None:
     show(fig)
 
     # 打印插件的帮助信息
-    print(help_plot("disper_energy"))
+    print(help_plot("heat_map"))
+
+
+def test_seismic_waveform_plot() -> None:
+    """测试并绘制地震波形图。"""
+    set_default_backend("mpl")  # 设置默认后端为 matplotlib
+
+    # 生成地震波形数据
+    seismic_data = generate_seismic_data()
+
+    # 绘制地震波形图
+    fig = plot(
+        "lines",  # 使用 line 插件绘制波形图
+        data={"x": seismic_data["time"], "y": seismic_data["traces"]},
+        title="Seismic Waveforms",  # 设置图标题
+        x_label="Time (s)",  # 设置 x 轴标签
+        y_label="Amplitude (m/s)",  # 设置 y 轴标签
+        x_lim=[0, 20],  # 设置 x 轴范围
+        y_lim=[-2, 2],  # 设置 y 轴范围
+        colors = ["blue","black"],
+        labels = ["s1", "s2"]
+    )
+
+    # 显示图形
+    show(fig)
+
+    # 打印插件的帮助信息
+    print(help_plot("lines"))  # 根据插件 id 调用 help_plot 获取帮助信息
 
 
 def main() -> None:
     """运行示例测试。"""
-    # test_ccf_wiggle_plot()
-    # test_beamforming_polar_heatmap()
+    test_ccf_wiggle_plot()
+    test_beamforming_polar_heatmap()
     test_dispersion_energy_plot()
+    test_seismic_waveform_plot()
 
 
 if __name__ == "__main__":
