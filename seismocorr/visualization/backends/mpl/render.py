@@ -60,15 +60,17 @@ def render(spec: PlotSpec) -> FigureHandle:
             x = layer.data.get("x")
             y = layer.data.get("y")
             cmap = layer.style.get("cmap", "viridis")
-            cbar_label = layer.style.get("colorbar_label", "")
+            cbar_label = layer.style.get("colorbar_label", "Energy")
+            
             artist = primitives.plot_heatmap(
                 ax,
                 z,
                 x=x,
                 y=y,
                 cmap=cmap,
-                colorbar_label=cbar_label,
+                colorbar_label=cbar_label,  
             )
+            
             extra.setdefault("artists", []).append(artist)
             continue
 
@@ -141,6 +143,8 @@ def render(spec: PlotSpec) -> FigureHandle:
     ax.set_title(layout.get("title", "") or "")
     ax.set_xlabel(layout.get("x_label", "") or "")
     ax.set_ylabel(layout.get("y_label", "") or "")
+    ax.set_xlim(layout.get("x_lim", "") or "")
+    ax.set_ylim(layout.get("y_lim", "") or "")
 
     if any(layer.name for layer in spec.layers):
         handles, labels = ax.get_legend_handles_labels()

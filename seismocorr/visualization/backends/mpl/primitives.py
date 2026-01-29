@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional, Tuple
 import numpy as np
 
 
-def plot_heatmap(ax, z, x=None, y=None, *, cmap="viridis", colorbar_label=""):
+def plot_heatmap(ax, z, x=None, y=None, *, cmap="", colorbar_label="", x_lim=None, y_lim=None ):
     """
     绘制二维热力图（rect heatmap）
     - x/y 为坐标轴刻度（可选）
@@ -29,6 +29,12 @@ def plot_heatmap(ax, z, x=None, y=None, *, cmap="viridis", colorbar_label=""):
         cmap=cmap,
     )
     cbar = plt.colorbar(im, ax=ax, shrink=0.9)
+
+    if x_lim is not None:
+        ax.set_xlim(x_lim)
+    if y_lim is not None:
+        ax.set_ylim(y_lim)
+        
     if colorbar_label:
         cbar.set_label(colorbar_label)
     return {"im": im, "colorbar": cbar}

@@ -73,6 +73,39 @@ def generate_beamforming_data(
     }
 
 
+def generate_dispersion_energy_data(
+    n_v: int = 50, n_f: int = 100, *, seed: int = 42
+) -> Dict[str, Any]:
+    """生成模拟的频散能量数据（能量与频率/速度的关系）。
+
+    Args:
+        n_v: 速度采样点数（或波数轴）。
+        n_f: 频率采样点数。
+        seed: 随机种子，用于可复现。
+
+    Returns:
+        dict，包含：
+            - E: (n_v, n_f) 的能量矩阵。
+            - f: (n_f,) 的频率轴。
+            - v: (n_v,) 的速度轴（或群速度/相速度轴）。
+    """
+    rng = np.random.default_rng(seed)
+
+    # 频率轴，假设频率从 0.01 Hz 到 10 Hz
+    f = np.logspace(-2, 1, n_f)
+    
+    # 速度轴，假设速度从 1000 m/s 到 5000 m/s
+    v = np.linspace(1000, 5000, n_v)
+
+    # 模拟能量矩阵 E：假设能量与频率和速度相关，使用正弦波与指数衰减相结合
+    E = np.zeros((n_v, n_f))
+    for i in range(n_v):
+        for j in range(n_f):
+            E[i, j] = np.exp(-((f[j] - 5.0)**2) / 2.0) * np.sin(v[i] * f[j] / 1000)
+
+    return {"E": E, "f": f, "v": v}
+
+
 def test_ccf_wiggle_plot() -> None:
     """测试并绘制 CCF wiggle 图。"""
     set_default_backend("mpl")
@@ -114,10 +147,37 @@ def test_beamforming_polar_heatmap() -> None:
     print(help_plot("beamforming.polar_heatmap"))
 
 
+def test_dispersion_energy_plot() -> None:
+    """测试并绘制频散能量图（f-v）。"""
+    # 生成频散能量数据
+    dispersion_data = generate_dispersion_energy_data()
+
+    # 绘制频散能量图
+    fig = plot(
+        "disper_energy",
+        data={"E": dispersion_data["E"], "f": dispersion_data["f"], "v": dispersion_data["v"]},
+        title="Dispersion Energy Map",
+        x_label="Frequency (Hz)",
+        y_label="Velocity (m/s)",
+        x_lim=[8, 10], 
+        y_lim=[3000, 5000],
+        cmap = "coolwarm",
+        colorbar_label = "Energy",
+
+    )
+
+    # 显示图形
+    show(fig)
+
+    # 打印插件的帮助信息
+    print(help_plot("disper_energy"))
+
+
 def main() -> None:
     """运行示例测试。"""
-    test_ccf_wiggle_plot()
-    test_beamforming_polar_heatmap()
+    # test_ccf_wiggle_plot()
+    # test_beamforming_polar_heatmap()
+    test_dispersion_energy_plot()
 
 
 if __name__ == "__main__":
